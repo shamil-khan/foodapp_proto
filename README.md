@@ -7,4 +7,5 @@ A modern monorepo architecture for a food application.
 - [x] Step 2: Initialize root package.json
 - [x] Step 3: Configure pnpm Workspaces
 - [x] Step 4: Install and configure Turborepo
-- [ ] Step 5: Install and configure Biome
+- [x] Step 5: Install and configure Biome
+- [ ] Step 6: Scaffold Hono Backend Application
