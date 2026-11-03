@@ -1,7 +1,7 @@
 {
   "name": "foodapp",
   "version": "1.0.0",
-   "private": true,
+  "private": true,
   "description": "FoodApp Monorepo Workspace Root",
   "main": "index.js",
   "scripts": {
@@ -18,5 +18,8 @@
     }
   },
   "packageManager": "pnpm@12.16.1",
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "turbo": "^2.11.10"
+  }
 }
