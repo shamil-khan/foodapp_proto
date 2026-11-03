@@ -8,4 +8,5 @@ A modern monorepo architecture for a food application.
 - [x] Step 3: Configure pnpm Workspaces
 - [x] Step 4: Install and configure Turborepo
 - [x] Step 5: Install and configure Biome
-- [ ] Step 6: Scaffold Hono Backend Application
+- [x] Step 6: Scaffold Hono Backend Application
+- [ ] Step 7: Scaffold Vite Frontend Application
