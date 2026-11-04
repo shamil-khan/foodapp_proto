@@ -1,52 +1,49 @@
 {
-	"version": "0.2.0",
-	"configurations": [
-		{
-			"name": "Debug Backend (Hono)",
-			"type": "node",
-			"request": "launch",
-			"cwd": "${workspaceFolder}/apps/backend",
-			"runtimeExecutable": "pnpm",
-			"runtimeArgs": ["dev"],
-			"skipFiles": ["<node_internals>/**"],
-			"smartStep": true
-			//   "port": [4000]
-		},
-		{
-			"name": "Debug Frontend (Vite) (Editor)",
-			"type": "editor-browser",
-			"request": "launch",
-			"url": "http://localhost:5173",
-			"webRoot": "${workspaceFolder}/apps/frontend",
-			"preLaunchTask": "watch-frontend",
-			// Forces VS Code to open the view within an internal pane instead of an external app window
-			"serverReadyAction": {
-				"action": "debugWithChrome", // "openExternally",
-				"killOnServerStop": true
-			}
-		},
-		{
-			"name": "Debug Frontend (Vite) (External)",
-			"type": "chrome",
-			"request": "launch",
-			"url": "http://localhost:5173",
-			"webRoot": "${workspaceFolder}/apps/frontend",
-			"runtimeExecutable": "/var/lib/flatpak/exports/bin/com.brave.Browser",
-			"preLaunchTask": "watch-frontend",
-			// Forces VS Code to open the view within an internal pane instead of an external app window
-			"serverReadyAction": {
-				"action": "openExternally",
-				"killOnServerStop": true
-			}
-		}
-	],
-	"compounds": [
-		{
-			"name": "Debug Fullstack (App)",
-			"configurations": [
-				"Debug Backend (Hono)",
-				"Debug Frontend (Vite) (Editor)"
-			]
-		}
-	]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Backend (Hono)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/backend",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev"],
+      "skipFiles": ["<node_internals>/**"],
+      "smartStep": true
+      //   "port": [4000]
+    },
+    {
+      "name": "Debug Frontend (Vite) (Editor)",
+      "type": "editor-browser",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/apps/frontend",
+      "preLaunchTask": "watch-frontend",
+      // Forces VS Code to open the view within an internal pane instead of an external app window
+      "serverReadyAction": {
+        "action": "debugWithChrome", // "openExternally",
+        "killOnServerStop": true
+      }
+    },
+    {
+      "name": "Debug Frontend (Vite) (External)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/apps/frontend",
+      "runtimeExecutable": "/var/lib/flatpak/exports/bin/com.brave.Browser",
+      "preLaunchTask": "watch-frontend",
+      // Forces VS Code to open the view within an internal pane instead of an external app window
+      "serverReadyAction": {
+        "action": "openExternally",
+        "killOnServerStop": true
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Debug Fullstack (App)",
+      "configurations": ["Debug Backend (Hono)", "Debug Frontend (Vite) (Editor)"]
+    }
+  ]
 }

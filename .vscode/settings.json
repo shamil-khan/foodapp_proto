@@ -1,20 +1,20 @@
 {
-	// Set Biome as the default formatter for your web source code files
-	"editor.defaultFormatter": "biomejs.biome",
-	"editor.formatOnSave": true,
-	"editor.codeActionsOnSave": {
-		"source.fixAll.biome": "explicit",
-		"source.organizeImports.biome": "explicit"
-	},
+  // Set Biome as the default formatter for your web source code files
+  "editor.defaultFormatter": "biomejs.biome",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.biome": "explicit",
+    "source.organizeImports.biome": "explicit"
+  },
 
-	// Turn off built-in VS Code basic validation that conflicts with Biome using modern keys
-	"js/ts.validate.enabled": false,
+  // Turn off built-in VS Code basic validation that conflicts with Biome using modern keys
+  "js/ts.validate.enabled": false,
 
-	// Clean up your explorer view by hiding build/caching directories
-	"files.exclude": {
-		"**/.turbo": true,
-		"**/dist": true,
-		"**/node_modules": true
-	},
-	"search.useIgnoreFiles": true
+  // Clean up your explorer view by hiding build/caching directories
+  "files.exclude": {
+    "**/.turbo": true,
+    "**/dist": true,
+    "**/node_modules": true
+  },
+  "search.useIgnoreFiles": true
 }
