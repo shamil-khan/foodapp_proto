@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { logger } from '@/logger';
 import heroImg from './assets/hero.png';
 import reactLogo from './assets/react.svg';
 import viteLogo from './assets/vite.svg';
@@ -6,6 +7,16 @@ import './App.css';
 
 function App() {
   const [count, setCount] = useState(0);
+  logger.debug('App component rendered', {
+    count,
+  });
+
+  const handleButtonClick = () => {
+    setCount((prevCount) => prevCount + 1);
+    logger.info('Button clicked', {
+      newCount: count + 1,
+    });
+  };
 
   return (
     <>
@@ -21,7 +32,7 @@ function App() {
             Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
           </p>
         </div>
-        <button type='button' className='counter' onClick={() => setCount((count) => count + 1)}>
+        <button type='button' className='counter' onClick={handleButtonClick}>
           Count is {count}
         </button>
       </section>
