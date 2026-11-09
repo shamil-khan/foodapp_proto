@@ -13,6 +13,9 @@
   "type": "module",
   "dependencies": {
     "@hono/node-server": "^2.1.6",
+    "@logtape/file": "^2.4.2",
+    "@logtape/hono": "^2.4.2",
+    "@logtape/logtape": "^2.4.2",
     "hono": "^4.13.16"
   },
   "devDependencies": {
