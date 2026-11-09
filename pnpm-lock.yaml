@@ -178,6 +178,12 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.6
         version: 2.1.6(hono@4.13.16)
+      '@inferdi/hono':
+        specifier: ^6.1.1
+        version: 6.1.1(@inferdi/inferdi@6.1.1)(hono@4.13.16)
+      '@inferdi/inferdi':
+        specifier: ^6.1.1
+        version: 6.1.1
       '@logtape/file':
         specifier: ^2.4.2
         version: 2.4.2(@logtape/logtape@2.4.2)
@@ -464,6 +470,17 @@ packages:
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4 || ^5.0.0-0
+
+  '@inferdi/hono@6.1.1':
+    resolution: {integrity: sha512-QbHYBpAydCELbvSNlyfU4P4tMYzOhowmzrmfmEqVyCMSXAXXyADH//WtRkO8q2RN3qBlrYLO38MWtEjXUSkUVg==}
+    engines: {node: '>=16.0.0'}
+    peerDependencies:
+      '@inferdi/inferdi': ^6.0.0
+      hono: ^4.0.0
+
+  '@inferdi/inferdi@6.1.1':
+    resolution: {integrity: sha512-o6BWLwz6qqAkX6iPLWzAM1vkbUstHcVj/K/tgN4B2zL+ajSsEmv2CQG7UC/DLXSm3Hvp5c/q1nok5vezjyVp2w==}
+    engines: {node: '>=16.0.0'}
 
   '@logtape/file@2.4.2':
     resolution: {integrity: sha512-Wit1GrwBQ1mCERREsBX5C4TKe3SWoAZ2bFBh7e4sbAnh1w2rOjD46puW+/f/A3G7HFIsAYlL03/r1/9CeKZ0XQ==}
@@ -1095,6 +1112,13 @@ snapshots:
   '@hono/node-server@2.1.6(hono@4.13.16)':
     dependencies:
       hono: 4.13.16
+
+  '@inferdi/hono@6.1.1(@inferdi/inferdi@6.1.1)(hono@4.13.16)':
+    dependencies:
+      '@inferdi/inferdi': 6.1.1
+      hono: 4.13.16
+
+  '@inferdi/inferdi@6.1.1': {}
 
   '@logtape/file@2.4.2(@logtape/logtape@2.4.2)':
     dependencies:

@@ -13,6 +13,8 @@
   "type": "module",
   "dependencies": {
     "@hono/node-server": "^2.1.6",
+    "@inferdi/hono": "^6.1.1",
+    "@inferdi/inferdi": "^6.1.1",
     "@logtape/file": "^2.4.2",
     "@logtape/hono": "^2.4.2",
     "@logtape/logtape": "^2.4.2",
