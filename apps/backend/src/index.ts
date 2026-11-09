@@ -4,6 +4,8 @@ import { honoLogger } from '@logtape/hono';
 import { getLogger } from '@logtape/logtape';
 import { Hono } from 'hono';
 import { type AppEnv, openRequestScope, rootContainer } from '@/di';
+import { globalErrorHandler } from '@/errorHandler';
+import { NotFoundError } from '@/errors';
 import { initLogger } from '@/logger';
 
 // 1. Initialize LogTape multi-sink system immediately
@@ -19,6 +21,8 @@ app.use(
     createScope: (_root, c) => openRequestScope(crypto.randomUUID(), c.req.header('x-user-id')),
   }),
 );
+
+app.onError(globalErrorHandler);
 
 // 2. Attach LogTape HTTP request logger
 app.use(
@@ -48,7 +52,26 @@ app.get('/api/health', (c) => {
 });
 
 app.get('/users/:id', async (c) => {
-  return c.json(await c.var.di.get('users').profile(c.req.param('id')));
+  const userId = c.req.param('id');
+  if (userId === 'forbidden') {
+    // Simply throw it; the boundary automatically traps it cleanly
+    throw new NotFoundError(`User with ID ${userId} does not exist.`);
+  }
+  return c.json(await c.var.di.get('users').profile(userId));
+});
+
+// Explicit 404 handler fallback for unmatched routing patterns
+app.notFound((c) => {
+  return c.json(
+    {
+      success: false,
+      error: {
+        code: 'NOT_FOUND',
+        message: `Route ${c.req.path} not found`,
+      },
+    },
+    404,
+  );
 });
 
 serve(

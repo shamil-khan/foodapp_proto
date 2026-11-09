@@ -1,0 +1,26 @@
+// src/errors.ts
+import type { StatusCode } from 'hono/utils/http-status';
+
+export class AppError extends Error {
+  constructor(
+    public readonly status: StatusCode,
+    public readonly errorCode: string,
+    message: string,
+  ) {
+    super(message);
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+// Concrete subclass examples
+export class NotFoundError extends AppError {
+  constructor(message = 'Resource not found') {
+    super(404, 'RESOURCE_NOT_FOUND', message);
+  }
+}
+
+export class BadRequestError extends AppError {
+  constructor(message: string) {
+    super(400, 'BAD_REQUEST', message);
+  }
+}
