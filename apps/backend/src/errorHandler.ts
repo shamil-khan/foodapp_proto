@@ -1,18 +1,10 @@
-// src/errorHandler.ts
-
-import { getLogger } from '@logtape/logtape';
 import type { ErrorHandler } from 'hono';
 import type { AppEnv } from '@/di';
 import { AppError } from '@/errors';
 
-const log = getLogger([
-  'app',
-  'backend',
-]);
-
 export const globalErrorHandler: ErrorHandler<AppEnv> = async (err, c) => {
   // 1. Resolve your InferDI log instance to capture structural trace
-  // const log = c.var.di.get('log');
+  const log = c.var.di.get('log');
 
   let status: number = 500;
   let code = 'INTERNAL_SERVER_ERROR';

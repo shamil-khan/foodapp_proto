@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { getFileSink } from '@logtape/file';
-import { configure, getConsoleSink } from '@logtape/logtape';
+import { configure, getConsoleSink, getLogger, type Logger } from '@logtape/logtape';
 
 // Generates your clean timestamp string: YYYY-MM-DD_HH-MM-SS
 const getLogFilename = () => {
@@ -39,3 +39,23 @@ export const initLogger = async () => {
     ],
   });
 };
+
+export class AppLogger {
+  private logtape: Logger;
+
+  constructor(private requestId: string) {
+    // Obtain the structured category logger from Logtape
+    this.logtape = getLogger([
+      'foodapp',
+      'backend',
+    ]);
+  }
+
+  info(strings: TemplateStringsArray, ...values: any[]) {
+    // Reconstruct the template string format safely
+    const message = strings.reduce((result, string, i) => result + string + (values[i] ?? ''), '');
+
+    // Dispatch the message into Logtape's runtime system
+    this.logtape.info(`${message} [RequestID: ${this.requestId}]`);
+  }
+}

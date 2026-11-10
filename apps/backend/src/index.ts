@@ -1,7 +1,6 @@
 import { serve } from '@hono/node-server';
 import { inferdiHono } from '@inferdi/hono';
 import { honoLogger } from '@logtape/hono';
-import { getLogger } from '@logtape/logtape';
 import { Hono } from 'hono';
 import { type AppEnv, openRequestScope, rootContainer } from '@/di';
 import { globalErrorHandler } from '@/errorHandler';
@@ -22,8 +21,6 @@ app.use(
   }),
 );
 
-app.onError(globalErrorHandler);
-
 // 2. Attach LogTape HTTP request logger
 app.use(
   honoLogger({
@@ -32,17 +29,13 @@ app.use(
   }),
 );
 
-// 3. Instantiate an app-specific logger category
-const log = getLogger([
-  'app',
-  'backend',
-]);
+app.onError(globalErrorHandler);
 
 app.get('/api/health', (c) => {
   const currentDatetime = new Date().toISOString();
 
   // Logs to both Console and the dynamic File at the same time
-  log.info`health check endpoint accessed at ${currentDatetime}`;
+  c.var.di.get('log').info`health check endpoint accessed at ${currentDatetime}`;
 
   return c.json({
     status: 'ok',
