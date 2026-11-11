@@ -1,14 +1,27 @@
 {
   "$schema": "./node_modules/turbo/schema.json",
+  "globalEnv": ["DATABASE_URL", "REDIS_URL", "NODE_ENV"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**"]
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
     "dev": {
       "cache": false,
       "persistent": true
     },
-    "lint": {}
+    "format": {
+      "cache": false
+    },
+    "lint": {
+      "cache": true
+    },
+    "db:migrate": {
+      "cache": false
+    },
+    "db:seed": {
+      "cache": false,
+      "dependsOn": ["db:migrate"]
+    }
   }
 }

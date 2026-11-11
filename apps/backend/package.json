@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsx build src/index.ts",
+    "format": "biome format --write src",
     "lint": "biome lint src"
   },
   "keywords": [],
@@ -12,6 +13,7 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@foodapp/db": "workspace:*",
     "@hono/node-server": "^2.1.6",
     "@inferdi/hono": "^6.1.1",
     "@inferdi/inferdi": "^6.1.1",

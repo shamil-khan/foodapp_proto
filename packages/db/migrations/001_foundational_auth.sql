@@ -1,0 +1,84 @@
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+
+DROP TYPE IF EXISTS "PlatformRole" CASCADE;
+
+
+CREATE TYPE "PlatformRole" AS ENUM('PLATFORM_ADMIN', 'CUSTOMER', 'DRIVER');
+
+
+CREATE TABLE IF NOT EXISTS "User" (
+  "id" UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+  "email" TEXT UNIQUE NOT NULL,
+  "name" TEXT NOT NULL,
+  "emailVerified" BOOLEAN NOT NULL DEFAULT FALSE,
+  "image" TEXT,
+  "role" "PlatformRole" NOT NULL DEFAULT 'CUSTOMER',
+  "createdAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE "User"
+ADD COLUMN IF NOT EXISTS "role" "PlatformRole" NOT NULL DEFAULT 'CUSTOMER';
+
+
+CREATE TABLE IF NOT EXISTS "Session" (
+  "id" UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+  "userId" UUID NOT NULL,
+  "token" TEXT UNIQUE NOT NULL,
+  "expiresAt" TIMESTAMP NOT NULL,
+  "ipAddress" TEXT,
+  "userAgent" TEXT,
+  "createdAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS "Account" (
+  "id" UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+  "userId" UUID NOT NULL,
+  "accountId" TEXT NOT NULL,
+  "providerId" TEXT NOT NULL,
+  "accessToken" TEXT,
+  "refreshToken" TEXT,
+  "idToken" TEXT,
+  "accessTokenExpiresAt" TIMESTAMP,
+  "refreshTokenExpiresAt" TIMESTAMP,
+  "scope" TEXT,
+  "password" TEXT,
+  "createdAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS "Verification" (
+  "id" UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+  "identifier" TEXT NOT NULL,
+  "value" TEXT NOT NULL,
+  "expiresAt" TIMESTAMP NOT NULL,
+  "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE "Session"
+DROP CONSTRAINT IF EXISTS fk_session_user;
+
+
+ALTER TABLE "Session"
+ADD CONSTRAINT fk_session_user FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE NOT VALID;
+
+
+ALTER TABLE "Session" VALIDATE CONSTRAINT fk_session_user;
+
+
+ALTER TABLE "Account"
+DROP CONSTRAINT IF EXISTS fk_account_user;
+
+
+ALTER TABLE "Account"
+ADD CONSTRAINT fk_account_user FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE NOT VALID;
+
+
+ALTER TABLE "Account" VALIDATE CONSTRAINT fk_account_user;

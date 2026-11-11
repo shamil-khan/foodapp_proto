@@ -3,13 +3,19 @@
   "version": "1.0.0",
   "private": true,
   "description": "FoodApp Monorepo Workspace Root",
-  "main": "index.js",
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "format": "biome format --write .",
-    "lint": "biome lint --write .",
-    "fixed": "biome check --write ."
+    "lint": "turbo run lint",
+    "format": "turbo run format",
+    "fixed": "biome check --write .",
+    "db:up": "podman compose up -d --wait",
+    "db:down": "podman compose down",
+    "db:drop": "podman compose down -v",
+    "db:migrate": "turbo run db:migrate --filter=@foodapp/db",
+    "db:seed": "turbo run db:seed --filter=@foodapp/db",
+    "db:setup": "pnpm db:up && pnpm db:migrate && pnpm db:seed",
+    "db:reset": "pnpm db:drop && pnpm db:setup"
   },
   "keywords": [],
   "author": "Shamil Khan",
