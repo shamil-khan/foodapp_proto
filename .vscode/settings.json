@@ -10,11 +10,19 @@
   // Turn off built-in VS Code basic validation that conflicts with Biome using modern keys
   "js/ts.validate.enabled": false,
 
+  // Disable the Built-in CSS Warning
+  "css.lint.unknownAtRules": "ignore",
+
   // Clean up your explorer view by hiding build/caching directories
   "files.exclude": {
     "**/.turbo": true,
     "**/dist": true,
     "**/node_modules": true
   },
-  "search.useIgnoreFiles": true
+  "search.useIgnoreFiles": true,
+
+  // Trust ui.shadcn.com in VS Code
+  "json.schemaDownload.trustedDomains": {
+    "https://ui.shadcn.com": true
+  }
 }

@@ -1,5 +1,13 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.6.7/schema.json",
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    },
+    "formatter": {
+      "quoteStyle": "single"
+    }
+  },
   "vcs": {
     "enabled": true,
     "clientKind": "git",
