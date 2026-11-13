@@ -11,7 +11,7 @@ await configure({
         'app',
       ],
       // Only show debug/info logs during local development
-      lowestLevel: import.meta.env.DEV ? 'debug' : 'warn',
+      lowestLevel: import.meta.env.DEV ? 'debug' : 'warning',
       sinks: [
         'console',
       ],
