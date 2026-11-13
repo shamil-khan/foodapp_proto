@@ -15,7 +15,8 @@
     "db:migrate": "turbo run db:migrate --filter=@foodapp/db",
     "db:seed": "turbo run db:seed --filter=@foodapp/db",
     "db:setup": "pnpm db:up && pnpm db:migrate && pnpm db:seed",
-    "db:reset": "pnpm db:drop && pnpm db:setup"
+    "db:reset": "pnpm db:drop && pnpm db:setup",
+    "ai-context": "node scripts/ai-context.js"
   },
   "keywords": [],
   "author": "Shamil Khan",
@@ -31,6 +32,7 @@
   "type": "module",
   "devDependencies": {
     "@biomejs/biome": "^2.6.4",
+    "strip-comments": "^2.0.1",
     "turbo": "^2.11.10"
   }
 }

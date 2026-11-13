@@ -1,42 +1,58 @@
 import { serve } from '@hono/node-server';
-import { inferdiHono } from '@inferdi/hono';
-import { honoLogger } from '@logtape/hono';
+import { withContext } from '@logtape/logtape';
 import { Hono } from 'hono';
-import { type AppEnv, openRequestScope, rootContainer } from '@/di';
+import { logger } from 'hono/logger';
+import { requestId } from 'hono/request-id';
+import type { AppEnv } from '@/container';
+import { catalogRoutes } from '@/contexts/catalog/services/catalog-routes';
+import { initDiScope, requirePosStaff } from '@/contexts/identity/services/auth-middleware';
+import { identityRoutes } from '@/contexts/identity/services/identity-routes';
+import { ledgerRoutes } from '@/contexts/ledger/services/ledger-routes';
+import { orderRoutes } from '@/contexts/ordering/services/order-routes';
 import { globalErrorHandler } from '@/errorHandler';
-import { NotFoundError } from '@/errors';
-import { initLogger } from '@/logger';
+import { AppLogger, initLogger } from '@/logger';
 
-// 1. Initialize LogTape multi-sink system immediately
 await initLogger();
+const bootLog = new AppLogger('startup');
+const httpLog = new AppLogger();
 
 const app = new Hono<AppEnv>();
 
-// Wire up the middleware to generate a unique scope per inbound HTTP request
+// 1. Generate Request ID & bind LogTape AsyncLocalStorage context
+app.use('*', requestId());
+app.use('*', async (c, next) => {
+  return withContext(
+    {
+      requestId: c.get('requestId'),
+    },
+    next,
+  );
+});
+
+// 2. Chronological Hono HTTP Logger (<-- Start, Errors in middle, --> End)
 app.use(
   '*',
-  inferdiHono({
-    container: rootContainer,
-    createScope: (_root, c) => openRequestScope(crypto.randomUUID(), c.req.header('x-user-id')),
+  logger((str) => {
+    httpLog.raw(str);
   }),
 );
 
-// 2. Attach LogTape HTTP request logger
-app.use(
-  honoLogger({
-    format: 'dev',
-    context: true,
-  }),
-);
+// 3. @inferdi/hono Scope Hydration (`c.var.di`)
+app.use('/api/*', initDiScope);
 
-app.onError(globalErrorHandler);
+// 4. Bounded Context Routes
+app.route('/api', identityRoutes);
+app.route('/api/restaurants', catalogRoutes);
+
+app.use('/api/pos/orders/*', requirePosStaff());
+app.route('/api/pos/orders', orderRoutes);
+
+app.route('/api/ledger', ledgerRoutes);
 
 app.get('/api/health', (c) => {
   const currentDatetime = new Date().toISOString();
-
-  // Logs to both Console and the dynamic File at the same time
   c.var.di.get('log').info`health check endpoint accessed at ${currentDatetime}`;
-
+  // throw new Error('Simulated error for testing error handling'); // Simulate an error for testing
   return c.json({
     status: 'ok',
     service: 'foodapp-backend',
@@ -44,35 +60,14 @@ app.get('/api/health', (c) => {
   });
 });
 
-app.get('/users/:id', async (c) => {
-  const userId = c.req.param('id');
-  if (userId === 'forbidden') {
-    // Simply throw it; the boundary automatically traps it cleanly
-    throw new NotFoundError(`User with ID ${userId} does not exist.`);
-  }
-  return c.json(await c.var.di.get('users').profile(userId));
-});
-
-// Explicit 404 handler fallback for unmatched routing patterns
-app.notFound((c) => {
-  return c.json(
-    {
-      success: false,
-      error: {
-        code: 'NOT_FOUND',
-        message: `Route ${c.req.path} not found`,
-      },
-    },
-    404,
-  );
-});
+app.onError(globalErrorHandler);
 
 serve(
   {
     fetch: app.fetch,
-    port: 4000,
+    port: 3000,
   },
   (info) => {
-    console.log(`Server is running on http://localhost:${info.port}`);
+    bootLog.info`Hono DDD Backend running at http://localhost:${info.port}`;
   },
 );

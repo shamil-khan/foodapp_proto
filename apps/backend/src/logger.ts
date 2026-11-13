@@ -1,35 +1,67 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import fs from 'node:fs';
 import path from 'node:path';
-import { getFileSink } from '@logtape/file';
-import { configure, getConsoleSink, getLogger, type Logger } from '@logtape/logtape';
+// import { getFileSink } from '@logtape/file';
+import {
+  configure,
+  getConsoleSink,
+  getLogger,
+  type Logger,
+  type LogRecord,
+} from '@logtape/logtape';
 
 // Generates your clean timestamp string: YYYY-MM-DD_HH-MM-SS
 const getLogFilename = () => {
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
-  const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS
-  return `dev_${dateStr}_${timeStr}.log`;
+  //const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS
+  // return `dev_${dateStr}_${timeStr}.log`;
+  return `dev_${dateStr}.log`;
+};
+
+const customFormatter = (record: LogRecord): string => {
+  const ts = new Date(record.timestamp).toISOString();
+  const level = record.level.toUpperCase().slice(0, 3);
+  const cat = record.category.join('·');
+  const msg = record.message
+    .map((part) => (typeof part === 'string' ? part : JSON.stringify(part)))
+    .join('');
+  const reqTag = record.properties.requestId
+    ? ` [RequestID: ${String(record.properties.requestId)}]`
+    : '';
+  return `${ts} [${level}] ${cat}: ${msg}${reqTag}\n`;
 };
 
 export const initLogger = async () => {
   const logDir = path.join(process.cwd(), 'logs');
+  fs.mkdirSync(logDir, {
+    recursive: true,
+  });
   const logFilePath = path.join(logDir, getLogFilename());
 
   await configure({
+    contextLocalStorage: new AsyncLocalStorage(),
     sinks: {
-      // Sink 1: Human-readable terminal output
-      console: getConsoleSink(),
-
-      // Sink 2: Simultaneous text stream to your physical file
-      file: getFileSink(logFilePath, {
-        // Automatically flushes data to disk immediately on every event
-        flushOnWrite: true,
+      console: getConsoleSink({
+        formatter: customFormatter,
       }),
+      file: (record: LogRecord) => {
+        fs.appendFileSync(logFilePath, customFormatter(record), 'utf8');
+      },
     },
     loggers: [
       {
-        // Category root match: applies to your custom logs and hono's internals
+        category: [
+          'logtape',
+          'meta',
+        ],
+        sinks: [
+          'console',
+        ],
+        lowestLevel: 'warning',
+      },
+      {
         category: [],
-        // 🔴 This array directs the logs to BOTH outputs at the exact same time
         sinks: [
           'console',
           'file',
@@ -41,21 +73,65 @@ export const initLogger = async () => {
 };
 
 export class AppLogger {
-  private logtape: Logger;
+  private readonly logtape: Logger;
 
-  constructor(private requestId: string) {
-    // Obtain the structured category logger from Logtape
+  constructor(private readonly fallbackRequestId?: string) {
     this.logtape = getLogger([
       'foodapp',
       'backend',
     ]);
   }
 
-  info(strings: TemplateStringsArray, ...values: any[]) {
-    // Reconstruct the template string format safely
-    const message = strings.reduce((result, string, i) => result + string + (values[i] ?? ''), '');
+  raw(message: string) {
+    const ANSI_ESCAPE_REGEX = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+    const clean = message.replace(ANSI_ESCAPE_REGEX, '');
+    const props = this.fallbackRequestId
+      ? {
+          message: clean,
+          requestId: this.fallbackRequestId,
+        }
+      : {
+          message: clean,
+        };
+    this.logtape.info('{message}', props);
+  }
 
-    // Dispatch the message into Logtape's runtime system
-    this.logtape.info(`${message} [RequestID: ${this.requestId}]`);
+  debug(strings: TemplateStringsArray, ...values: unknown[]) {
+    const message = strings.reduce((acc, str, i) => acc + str + String(values[i] ?? ''), '');
+    const props = this.fallbackRequestId
+      ? {
+          message,
+          requestId: this.fallbackRequestId,
+        }
+      : {
+          message,
+        };
+    this.logtape.debug('{message}', props);
+  }
+
+  info(strings: TemplateStringsArray, ...values: unknown[]) {
+    const message = strings.reduce((acc, str, i) => acc + str + String(values[i] ?? ''), '');
+    const props = this.fallbackRequestId
+      ? {
+          message,
+          requestId: this.fallbackRequestId,
+        }
+      : {
+          message,
+        };
+    this.logtape.info('{message}', props);
+  }
+
+  error(strings: TemplateStringsArray, ...values: unknown[]) {
+    const message = strings.reduce((acc, str, i) => acc + str + String(values[i] ?? ''), '');
+    const props = this.fallbackRequestId
+      ? {
+          message,
+          requestId: this.fallbackRequestId,
+        }
+      : {
+          message,
+        };
+    this.logtape.error('{message}', props);
   }
 }

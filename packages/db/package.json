@@ -14,7 +14,8 @@
     "./types": "./src/types.ts"
   },
   "scripts": {
-    "db:migrate": "tsx --env-file=../../.env src/setup.ts",
+    "db:codegen": "tsx --env-file=../../.env src/codegen.ts",
+    "db:migrate": "tsx --env-file=../../.env src/setup.ts && pnpm db:codegen",
     "db:seed": "tsx --env-file=../../.env src/seed.ts",
     "format:migrations": "for f in migrations/*.sql; do sql-formatter -c sql-formatter.json --fix \"$f\"; done",
     "format:seeds": "for f in seeds/*.sql; do sql-formatter -c sql-formatter.json --fix \"$f\"; done",
