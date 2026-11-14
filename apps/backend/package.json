@@ -6,7 +6,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsx build src/index.ts",
     "format": "biome format --write src",
-    "lint": "biome lint src"
+    "lint": "biome lint src",
+    "fixed": "biome check --write src"
   },
   "keywords": [],
   "author": "Shamil Khan",
@@ -15,13 +16,16 @@
   "dependencies": {
     "@foodapp/db": "workspace:*",
     "@hono/node-server": "^2.1.6",
+    "@hono/zod-openapi": "^1.6.3",
     "@inferdi/hono": "^6.1.1",
     "@inferdi/inferdi": "^6.1.1",
     "@logtape/file": "^2.4.2",
     "@logtape/hono": "^2.4.2",
     "@logtape/logtape": "^2.4.2",
+    "@scalar/hono-api-reference": "^0.12.20",
     "better-auth": "^1.7.20",
-    "hono": "^4.13.16"
+    "hono": "^4.13.16",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

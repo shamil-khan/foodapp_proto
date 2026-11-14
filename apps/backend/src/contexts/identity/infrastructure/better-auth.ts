@@ -1,14 +1,18 @@
 import { pgPool, redisClient } from '@foodapp/db';
 import { betterAuth } from 'better-auth';
-import { admin, phoneNumber } from 'better-auth/plugins';
+import { admin, bearer, phoneNumber } from 'better-auth/plugins';
 import { createAccessControl } from 'better-auth/plugins/access';
 import { adminAc, defaultStatements } from 'better-auth/plugins/admin/access';
+import { getAllowedOrigins } from '@/config/cors';
 import { AppLogger } from '@/logger';
 
 const bootstrapLog = new AppLogger('better-auth');
 
-if (!redisClient.isOpen) {
-  await redisClient.connect();
+async function ensureRedisConnected() {
+  if (!redisClient.isOpen) {
+    await redisClient.connect();
+  }
+  return redisClient;
 }
 
 const ac = createAccessControl(defaultStatements);
@@ -24,32 +28,33 @@ const customerRole = ac.newRole({
 
 export const auth = betterAuth({
   database: pgPool,
+  trustedOrigins: getAllowedOrigins,
 
-  // 1. Hybrid PostgreSQL + Redis Secondary Storage (Microservice-ready)
   secondaryStorage: {
     get: async (key) => {
-      return await redisClient.get(`auth:${key}`);
+      const client = await ensureRedisConnected();
+      return await client.get(`auth:${key}`);
     },
     set: async (key, value, ttl) => {
+      const client = await ensureRedisConnected();
       if (ttl) {
-        await redisClient.set(`auth:${key}`, value, {
+        await client.set(`auth:${key}`, value, {
           EX: ttl,
         });
       } else {
-        await redisClient.set(`auth:${key}`, value);
+        await client.set(`auth:${key}`, value);
       }
     },
     delete: async (key) => {
-      await redisClient.del(`auth:${key}`);
+      const client = await ensureRedisConnected();
+      await client.del(`auth:${key}`);
     },
   },
 
-  // 2. Desktop Login for Platform Admins
   emailAndPassword: {
     enabled: true,
   },
 
-  // 3. Map custom RBAC role onto global User table
   user: {
     modelName: 'User',
     additionalFields: {
@@ -70,6 +75,7 @@ export const auth = betterAuth({
     modelName: 'Verification',
   },
   plugins: [
+    bearer(),
     phoneNumber({
       sendOTP: async ({ phoneNumber: mobile, code }) => {
         bootstrapLog.info`[SMS OTP Showcase] Sending code ${code} to ${mobile}`;

@@ -11,31 +11,40 @@ export class CatalogController {
     private readonly queryBus: QueryBus,
   ) {}
 
-  async listRestaurants(c: Context<AppEnv>) {
-    const postcodeSector = c.req.query('postcodeSector');
-    const search = c.req.query('search');
-    const skip = Number(c.req.query('skip') ?? 0);
-    const take = Number(c.req.query('take') ?? 20);
-
+  async listRestaurants(
+    c: Context<AppEnv>,
+    query: {
+      postcodeSector?: string;
+      search?: string;
+      skip?: number;
+      take?: number;
+    },
+  ) {
     const restaurants = await this.queryBus.ask<StorefrontRestaurantDto[]>('GetRestaurants', {
-      postcodeSector,
-      search,
-      skip,
-      take,
+      postcodeSector: query.postcodeSector,
+      search: query.search,
+      skip: query.skip ?? 0,
+      take: query.take ?? 20,
     });
 
-    return c.json({
-      restaurants,
-    });
+    return c.json(
+      {
+        restaurants,
+      },
+      200,
+    );
   }
 
-  async getMenuSnapshot(c: Context<AppEnv>) {
-    const restaurantId = c.req.param('restaurantId');
-
+  async getMenuSnapshot(
+    c: Context<AppEnv>,
+    params: {
+      restaurantId: string;
+    },
+  ) {
     const snapshot = await this.queryBus.ask<CompiledMenuSnapshot | null>(
       'GetRestaurantMenuSnapshot',
       {
-        restaurantId,
+        restaurantId: params.restaurantId,
       },
     );
 
@@ -48,38 +57,45 @@ export class CatalogController {
       );
     }
 
-    return c.json(snapshot);
+    return c.json(snapshot, 200);
   }
 
-  async updateItemPrice(c: Context<AppEnv>) {
-    const menuItemId = c.req.param('itemId');
-    const body = await c.req.json<{
+  async updateItemPrice(
+    c: Context<AppEnv>,
+    params: {
+      itemId: string;
+    },
+    body: {
       newBasePrice: number;
       expectedRowVersion: number;
-    }>();
-
+    },
+  ) {
     const result = await this.commandBus.dispatch<Result<void, DomainError>>(
       'UpdateMenuItemPrice',
       {
-        menuItemId,
+        menuItemId: params.itemId,
         newBasePrice: body.newBasePrice,
         expectedRowVersion: body.expectedRowVersion,
       },
     );
 
     if (!result.ok) {
+      const status = result.error.statusCode === 409 ? 409 : 400;
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        result.error.statusCode as 400 | 409,
+        status,
       );
     }
 
-    return c.json({
-      success: true,
-      menuItemId,
-    });
+    return c.json(
+      {
+        success: true as const,
+        menuItemId: params.itemId,
+      },
+      200,
+    );
   }
 }

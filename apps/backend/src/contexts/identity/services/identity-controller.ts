@@ -14,12 +14,13 @@ export class IdentityController {
     private readonly queryBus: QueryBus,
   ) {}
 
-  async loginPosStaff(c: Context<AppEnv>) {
-    const body = await c.req.json<{
+  async loginPosStaff(
+    c: Context<AppEnv>,
+    body: {
       email: string;
       password: string;
-    }>();
-
+    },
+  ) {
     const result = await this.commandBus.dispatch<Result<PosStaffSessionClaims, DomainError>>(
       'LoginPosStaff',
       {
@@ -34,23 +35,29 @@ export class IdentityController {
           code: result.error.code,
           error: result.error.message,
         },
-        result.error.statusCode as 401,
+        401,
       );
     }
 
     const token = await this.posTokenService.issueShiftSession(c, result.value);
-    return c.json({
-      success: true,
-      token,
-      staff: result.value,
-    });
+    return c.json(
+      {
+        success: true as const,
+        token,
+        staff: result.value,
+      },
+      200,
+    );
   }
 
   logoutPosStaff(c: Context<AppEnv>) {
     this.posTokenService.clearShiftSession(c);
-    return c.json({
-      success: true,
-    });
+    return c.json(
+      {
+        success: true as const,
+      },
+      200,
+    );
   }
 
   async getCurrentActor(c: Context<AppEnv>) {
@@ -65,8 +72,11 @@ export class IdentityController {
       );
     }
 
-    return c.json({
-      actor: profile,
-    });
+    return c.json(
+      {
+        actor: profile,
+      },
+      200,
+    );
   }
 }

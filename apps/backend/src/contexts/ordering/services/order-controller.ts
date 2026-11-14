@@ -13,8 +13,13 @@ export class OrderController {
     private readonly request: RequestContext,
   ) {}
 
-  async listOrders(c: Context<AppEnv>) {
-    const restaurantId = this.request.restaurantId ?? c.req.query('restaurantId');
+  async listOrders(
+    c: Context<AppEnv>,
+    query: {
+      restaurantId?: string;
+    },
+  ) {
+    const restaurantId = this.request.restaurantId ?? query.restaurantId;
 
     if (!restaurantId) {
       return c.json(
@@ -29,24 +34,35 @@ export class OrderController {
       restaurantId,
     });
 
-    return c.json({
-      orders,
-    });
+    return c.json(
+      {
+        orders: orders.map((order) => ({
+          ...order,
+          createdAt:
+            order.createdAt instanceof Date
+              ? order.createdAt.toISOString()
+              : String(order.createdAt),
+        })),
+      },
+      200,
+    );
   }
 
-  async placeOrder(c: Context<AppEnv>) {
-    const body = await c.req.json<{
+  async placeOrder(
+    c: Context<AppEnv>,
+    body: {
+      clientOrderId?: string;
       restaurantId?: string;
       diningTableId?: string;
       customerId?: string;
-      orderSource?: OrderSource;
+      orderSource: OrderSource;
       items: {
         menuItemId: string;
         quantity: number;
         modifierIds?: string[];
       }[];
-    }>();
-
+    },
+  ) {
     const restaurantId = this.request.restaurantId ?? body.restaurantId;
     if (!restaurantId) {
       return c.json(
@@ -69,49 +85,57 @@ export class OrderController {
       restaurantId,
       diningTableId: body.diningTableId,
       customerId: body.customerId,
-      orderSource: body.orderSource ?? 'DINE_IN',
+      orderSource: body.orderSource,
       items: body.items,
     });
 
     if (!result.ok) {
+      const status = result.error.statusCode === 404 ? 404 : 400;
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        result.error.statusCode as 400,
+        status,
       );
     }
 
     return c.json(result.value, 201);
   }
 
-  async settleOrder(c: Context<AppEnv>) {
-    const orderId = c.req.param('id');
-    const body = await c.req.json<{
+  async settleOrder(
+    c: Context<AppEnv>,
+    params: {
+      id: string;
+    },
+    body: {
       paymentMethod: InStorePaymentMethod;
-      tipAmount?: number;
-    }>();
-
+      tipAmount: number;
+    },
+  ) {
     const result = await this.commandBus.dispatch<Result<void, DomainError>>('SettlePosOrder', {
-      orderId,
+      orderId: params.id,
       paymentMethod: body.paymentMethod,
-      tipAmount: body.tipAmount ?? 0,
+      tipAmount: body.tipAmount,
     });
 
     if (!result.ok) {
+      const status = result.error.statusCode === 404 ? 404 : 400;
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        result.error.statusCode as 400,
+        status,
       );
     }
 
-    return c.json({
-      success: true,
-      orderId,
-    });
+    return c.json(
+      {
+        success: true as const,
+        orderId: params.id,
+      },
+      200,
+    );
   }
 }
