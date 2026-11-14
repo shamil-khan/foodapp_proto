@@ -5,6 +5,8 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { pwaConfig } from './pwa.config.ts';
 
+const isCapacitor = process.env.CAPACITOR_BUILD === 'true';
+
 // https://vite.dev/config/
 export default defineConfig({
   // server: {
@@ -14,7 +16,10 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    VitePWA(pwaConfig),
+    VitePWA({
+      ...pwaConfig,
+      disable: isCapacitor,
+    }),
   ],
   resolve: {
     alias: {

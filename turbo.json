@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/turbo/schema.json",
-  "globalEnv": ["DATABASE_URL", "REDIS_URL", "NODE_ENV"],
+  "globalEnv": ["CAPACITOR_BUILD", "DATABASE_URL", "REDIS_URL", "NODE_ENV"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

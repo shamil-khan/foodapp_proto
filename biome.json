@@ -14,7 +14,8 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignoreUnknown": false
+    "ignoreUnknown": false,
+    "includes": ["**", "!**/dist", "!**/android", "!**/ios"]
   },
   "formatter": {
     "enabled": true,

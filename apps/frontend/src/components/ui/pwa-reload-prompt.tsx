@@ -20,7 +20,9 @@ export function PwaReloadPrompt() {
   return (
     <div className='fixed bottom-4 right-4 z-50 flex max-w-sm flex-col gap-3 rounded-lg border bg-background p-4 shadow-lg'>
       <div className='text-sm font-medium'>
-        {offlineReady ? 'FoodApp is ready to work offline.' : 'New version of FoodApp available.'}
+        {offlineReady
+          ? 'FoodApp is ready to work offline.'
+          : 'New version of FoodApp is available.'}
       </div>
       <div className='flex items-center justify-end gap-2'>
         {needRefresh && (

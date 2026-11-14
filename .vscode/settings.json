@@ -16,7 +16,7 @@
   // Clean up your explorer view by hiding build/caching directories
   "files.exclude": {
     "**/.turbo": true,
-    "**/dist": true,
+    "**/dist": false,
     "**/node_modules": true
   },
   "search.useIgnoreFiles": true,
