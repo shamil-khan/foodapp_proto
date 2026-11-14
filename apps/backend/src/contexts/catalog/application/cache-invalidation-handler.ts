@@ -21,6 +21,11 @@ export class MenuCacheInvalidationHandler {
       const snapshot = await this.catalogRepo.rebuildAndPersistSnapshot(restaurantId, actorId);
       if (snapshot) {
         const cacheKey = `menu:snapshot:${restaurantId}`;
+
+        if (!this.redis.isOpen) {
+          await this.redis.connect();
+        }
+
         await this.redis.set(cacheKey, JSON.stringify(snapshot), {
           EX: 3600,
         });

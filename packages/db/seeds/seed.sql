@@ -1,3 +1,7 @@
+CREATE FUNCTION pg_temp.seed_actor() RETURNS UUID LANGUAGE SQL IMMUTABLE AS $$
+  SELECT '00000000-0000-4000-85ee-000000000001'::UUID;
+$$;
+
 -- 1. SEED 5 GLOBAL ADMINS
 INSERT INTO
   "User" (
@@ -13,8 +17,8 @@ SELECT
   'UK Platform Admin ' || i,
   TRUE,
   'PLATFORM_ADMIN',
-  '00000000-0000-0000-5ee0-000000000001'::UUID,
-  '00000000-0000-0000-5ee0-000000000001'::UUID
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
 FROM
   generate_series(1, 5) AS i
 ON CONFLICT ("email") DO NOTHING;
@@ -33,13 +37,13 @@ INSERT INTO
   )
 VALUES
   (
-    '11111111-1111-1111-1111-111111111111',
+    '11111111-1111-4111-8111-111111111111',
     'customer1@ukmail.co.uk',
     'Oliver Twist',
     TRUE,
     'CUSTOMER',
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   )
 ON CONFLICT ("email") DO NOTHING;
 
@@ -58,8 +62,8 @@ SELECT
   'UK Customer ' || i,
   TRUE,
   'CUSTOMER',
-  '00000000-0000-0000-5ee0-000000000001'::UUID,
-  '00000000-0000-0000-5ee0-000000000001'::UUID
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
 FROM
   generate_series(2, 10) AS i
 ON CONFLICT ("email") DO NOTHING;
@@ -78,13 +82,13 @@ INSERT INTO
   )
 VALUES
   (
-    '22222222-2222-2222-2222-222222222222',
+    '22222222-2222-4222-8222-222222222222',
     'rider1@ukfleet.co.uk',
     'Harry Potter Rider',
     TRUE,
     'DRIVER',
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   )
 ON CONFLICT ("email") DO NOTHING;
 
@@ -102,14 +106,14 @@ INSERT INTO
   )
 VALUES
   (
-    '33333333-3333-3333-3333-333333333333',
-    '22222222-2222-2222-2222-222222222222',
+    '33333333-3333-4333-8333-333333333333',
+    '22222222-2222-4222-8222-222222222222',
     'UK-DVLA-001',
     'Electric Moped',
     FALSE,
     ARRAY['E1', 'SW1A'],
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   )
 ON CONFLICT ("userId") DO NOTHING;
 
@@ -128,14 +132,13 @@ SELECT
   'Showcase Rider ' || i,
   TRUE,
   'DRIVER',
-  '00000000-0000-0000-5ee0-000000000001'::UUID,
-  '00000000-0000-0000-5ee0-000000000001'::UUID
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
 FROM
   generate_series(2, 10) AS i
 ON CONFLICT ("email") DO NOTHING;
 
-
--- 4. SEED 10 UK RESTAURANTS (Deterministic UUIDs for clean relational linking)
+-- 4. SEED 10 UK RESTAURANTS (Deterministic RFC 4122 v4 UUIDs for clean relational linking)
 INSERT INTO
   "Restaurant" (
     "id",
@@ -152,7 +155,7 @@ INSERT INTO
   )
 VALUES
   (
-    'a0000000-0000-0000-0000-000000000001',
+    'a0000000-0000-4000-8000-000000000001',
     'Smash 360 London',
     'GB100012345',
     '08005432',
@@ -161,11 +164,11 @@ VALUES
     11,
     'WEEKLY',
     12.50,
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   ),
   (
-    'a0000000-0000-0000-0000-000000000002',
+    'a0000000-0000-4000-8000-000000000002',
     'Westminster Patty Co',
     'GB100024690',
     '08010864',
@@ -174,11 +177,11 @@ VALUES
     12,
     'DAILY',
     12.50,
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   ),
   (
-    'a0000000-0000-0000-0000-000000000003',
+    'a0000000-0000-4000-8000-000000000003',
     'Manchester Smash',
     'GB100037035',
     '08016296',
@@ -187,11 +190,11 @@ VALUES
     13,
     'WEEKLY',
     12.50,
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   ),
   (
-    'a0000000-0000-0000-0000-000000000004',
+    'a0000000-0000-4000-8000-000000000004',
     'Brum Burger Lab',
     'GB100049380',
     '08021728',
@@ -200,11 +203,11 @@ VALUES
     14,
     'DAILY',
     12.50,
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   ),
   (
-    'a0000000-0000-0000-0000-000000000005',
+    'a0000000-0000-4000-8000-000000000005',
     'Leeds Grill 360',
     'GB100061725',
     '08027160',
@@ -213,11 +216,11 @@ VALUES
     15,
     'WEEKLY',
     12.50,
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   ),
   (
-    'a0000000-0000-0000-0000-000000000006',
+    'a0000000-0000-4000-8000-000000000006',
     'Glasgow Melt',
     'GB100074070',
     '08032592',
@@ -226,11 +229,11 @@ VALUES
     16,
     'DAILY',
     12.50,
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   ),
   (
-    'a0000000-0000-0000-0000-000000000007',
+    'a0000000-0000-4000-8000-000000000007',
     'Edinburgh Stack',
     'GB100086415',
     '08038024',
@@ -239,11 +242,11 @@ VALUES
     17,
     'WEEKLY',
     12.50,
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   ),
   (
-    'a0000000-0000-0000-0000-000000000008',
+    'a0000000-0000-4000-8000-000000000008',
     'Cardiff Brioche',
     'GB100098760',
     '08043456',
@@ -252,11 +255,11 @@ VALUES
     10,
     'DAILY',
     12.50,
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   ),
   (
-    'a0000000-0000-0000-0000-000000000009',
+    'a0000000-0000-4000-8000-000000000009',
     'Bristol Bun House',
     'GB100111105',
     '08048888',
@@ -265,11 +268,11 @@ VALUES
     11,
     'WEEKLY',
     12.50,
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   ),
   (
-    'a0000000-0000-0000-0000-000000000010',
+    'a0000000-0000-4000-8000-000000000010',
     'Liverpool Smash',
     'GB100123450',
     '08054320',
@@ -278,11 +281,10 @@ VALUES
     12,
     'DAILY',
     12.50,
-    '00000000-0000-0000-5ee0-000000000001',
-    '00000000-0000-0000-5ee0-000000000001'
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   )
 ON CONFLICT ("id") DO NOTHING;
-
 
 -- 5. SEED LAYOUTS & PAYMENT CONFIGS FOR ALL 10 RESTAURANTS
 INSERT INTO
@@ -297,8 +299,8 @@ SELECT
   "id",
   'uk_pos_modern_v1',
   '#1E293B',
-  '00000000-0000-0000-5ee0-000000000001'::UUID,
-  '00000000-0000-0000-5ee0-000000000001'::UUID
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
 FROM
   "Restaurant"
 ON CONFLICT ("restaurantId") DO NOTHING;
@@ -316,8 +318,8 @@ SELECT
   "id",
   'INSTANT_SPLIT',
   'acct_uk_stripe_' || right("id"::TEXT, 4),
-  '00000000-0000-0000-5ee0-000000000001'::UUID,
-  '00000000-0000-0000-5ee0-000000000001'::UUID
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
 FROM
   "Restaurant"
 ON CONFLICT ("restaurantId") DO NOTHING;
@@ -343,8 +345,8 @@ SELECT
   END,
   4,
   'qr_tok_' || right(r."id"::TEXT, 4) || '_' || t_idx,
-  '00000000-0000-0000-5ee0-000000000001'::UUID,
-  '00000000-0000-0000-5ee0-000000000001'::UUID
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
 FROM
   "Restaurant" r
   CROSS JOIN generate_series(1, 5) AS t_idx
@@ -368,8 +370,8 @@ SELECT
   '$2b$10$MockHashedPasswordStringForTenantStaff',
   'Staff ' || s.idx || ' (' || r."name" || ')',
   s.role_name::"TenantRole",
-  '00000000-0000-0000-5ee0-000000000001'::UUID,
-  '00000000-0000-0000-5ee0-000000000001'::UUID
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
 FROM
   "Restaurant" r
   CROSS JOIN (
@@ -387,7 +389,6 @@ FROM
   ) AS s (idx, role_name)
 ON CONFLICT ("email") DO NOTHING;
 
-
 -- 8. SEED CATEGORIES, SMASH BURGER MENU ITEMS & MODIFIERS
 INSERT INTO
   "Category" (
@@ -401,8 +402,8 @@ SELECT
   r."id",
   c.cat_name,
   c.weight,
-  '00000000-0000-0000-5ee0-000000000001'::UUID,
-  '00000000-0000-0000-5ee0-000000000001'::UUID
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
 FROM
   "Restaurant" r
   CROSS JOIN (
@@ -452,8 +453,8 @@ SELECT
     WHEN 'Thick Shakes' THEN 'BAR_PRINTER'::"KdsRoutingTarget"
     ELSE 'KITCHEN_SCREEN'::"KdsRoutingTarget"
   END,
-  '00000000-0000-0000-5ee0-000000000001'::UUID,
-  '00000000-0000-0000-5ee0-000000000001'::UUID
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
 FROM
   "Category" c
   JOIN "Restaurant" r ON r."id" = c."restaurantId";
@@ -471,8 +472,8 @@ SELECT
   m."id",
   mod.mod_name,
   mod.price,
-  '00000000-0000-0000-5ee0-000000000001'::UUID,
-  '00000000-0000-0000-5ee0-000000000001'::UUID
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
 FROM
   "MenuItem" m
   JOIN "Category" c ON c."id" = m."categoryId"
@@ -486,7 +487,18 @@ WHERE
   c."name" = 'Smash Burgers';
 
 
--- 9. POPULATE JSONB MENU SNAPSHOTS FOR REDIS FALLBACK
+-- 9. POPULATE JSONB MENU SNAPSHOTS FOR REDIS FALLBACK (CompiledMenuSnapshot Contract)
+WITH
+  snapshot_payload AS (
+    SELECT
+      r."id" AS restaurant_id,
+      md5(r."id"::TEXT || now()::TEXT) AS version_hash,
+      to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS generated_at,
+      r."name" AS restaurant_name,
+      r."postcodeSector" AS postcode_sector
+    FROM
+      "Restaurant" r
+  )
 INSERT INTO
   "MenuSnapshot" (
     "restaurantId",
@@ -496,58 +508,108 @@ INSERT INTO
     "updatedBy"
   )
 SELECT
-  r."id",
-  md5(r."id"::TEXT || now()::TEXT),
+  sp.restaurant_id,
+  sp.version_hash,
   jsonb_build_object(
     'restaurantId',
-    r."id",
+    sp.restaurant_id,
     'restaurantName',
-    r."name",
+    sp.restaurant_name,
     'postcodeSector',
-    r."postcodeSector",
+    sp.postcode_sector,
+    'versionHash',
+    sp.version_hash,
+    'generatedAt',
+    sp.generated_at,
     'categories',
-    (
-      SELECT
-        jsonb_agg(
-          jsonb_build_object(
-            'id',
-            c."id",
-            'name',
-            c."name",
-            'items',
-            (
-              SELECT
-                jsonb_agg(
-                  jsonb_build_object(
-                    'id',
-                    m."id",
-                    'name',
-                    m."name",
-                    'price',
-                    m."basePrice",
-                    'allergens',
-                    m."allergenFlags"
-                  )
-                )
-              FROM
-                "MenuItem" m
-              WHERE
-                m."categoryId" = c."id"
+    COALESCE(
+      (
+        SELECT
+          jsonb_agg(
+            jsonb_build_object(
+              'id',
+              c."id",
+              'name',
+              c."name",
+              'sortWeight',
+              c."sortWeight",
+              'items',
+              COALESCE(
+                (
+                  SELECT
+                    jsonb_agg(
+                      jsonb_build_object(
+                        'id',
+                        m."id",
+                        'name',
+                        m."name",
+                        'description',
+                        m."description",
+                        'basePrice',
+                        m."basePrice"::DOUBLE PRECISION,
+                        'vatRate',
+                        m."vatRate"::DOUBLE PRECISION,
+                        'allergenFlags',
+                        to_jsonb(COALESCE(m."allergenFlags", '{}'::TEXT[])),
+                        'kdsTarget',
+                        m."kdsTarget",
+                        'imageUrl',
+                        m."imageUrl",
+                        'modifiers',
+                        COALESCE(
+                          (
+                            SELECT
+                              jsonb_agg(
+                                jsonb_build_object(
+                                  'id',
+                                  im."id",
+                                  'name',
+                                  im."name",
+                                  'extraPrice',
+                                  im."extraPrice"::DOUBLE PRECISION
+                                )
+                              )
+                            FROM
+                              "ItemModifier" im
+                            WHERE
+                              im."menuItemId" = m."id"
+                              AND im."deletedAt" IS NULL
+                          ),
+                          '[]'::JSONB
+                        )
+                      )
+                    )
+                  FROM
+                    "MenuItem" m
+                  WHERE
+                    m."categoryId" = c."id"
+                    AND m."isActive" = TRUE
+                    AND m."deletedAt" IS NULL
+                ),
+                '[]'::JSONB
+              )
             )
+            ORDER BY
+              c."sortWeight" ASC
           )
-        )
-      FROM
-        "Category" c
-      WHERE
-        c."restaurantId" = r."id"
+        FROM
+          "Category" c
+        WHERE
+          c."restaurantId" = sp.restaurant_id
+          AND c."deletedAt" IS NULL
+      ),
+      '[]'::JSONB
     )
   ),
-  '00000000-0000-0000-5ee0-000000000001'::UUID,
-  '00000000-0000-0000-5ee0-000000000001'::UUID
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
 FROM
-  "Restaurant" r
-ON CONFLICT ("restaurantId") DO NOTHING;
-
+  snapshot_payload sp
+ON CONFLICT ("restaurantId") DO UPDATE
+SET
+  "versionHash" = EXCLUDED."versionHash",
+  "serializedMenu" = EXCLUDED."serializedMenu",
+  "updatedAt" = CURRENT_TIMESTAMP;
 
 -- 10. SEED 20 HISTORICAL ORDERS (15 IN-STORE POS + 5 SHOWCASE DELIVERY) & LEDGERS
 WITH
@@ -572,7 +634,7 @@ WITH
       r."id",
       CASE
         WHEN o_idx = 2
-        AND right(r."id"::TEXT, 2)::INT > 5 THEN '11111111-1111-1111-1111-111111111111'::UUID
+        AND right(r."id"::TEXT, 2)::INT > 5 THEN '11111111-1111-4111-8111-111111111111'::UUID
         ELSE NULL
       END,
       (
@@ -587,7 +649,7 @@ WITH
       ),
       CASE
         WHEN o_idx = 2
-        AND right(r."id"::TEXT, 2)::INT > 5 THEN '33333333-3333-3333-3333-333333333333'::UUID
+        AND right(r."id"::TEXT, 2)::INT > 5 THEN '33333333-3333-4333-8333-333333333333'::UUID
         ELSE NULL
       END,
       CASE
@@ -613,8 +675,8 @@ WITH
         AND right(r."id"::TEXT, 2)::INT > 5 THEN 22.49
         ELSE 19.99
       END,
-      '00000000-0000-0000-5ee0-000000000001'::UUID,
-      '00000000-0000-0000-5ee0-000000000001'::UUID
+      pg_temp.seed_actor()::UUID,
+      pg_temp.seed_actor()::UUID
     FROM
       "Restaurant" r
       CROSS JOIN generate_series(1, 2) AS o_idx
@@ -638,8 +700,8 @@ WITH
       'The Light One',
       8.99,
       1,
-      '00000000-0000-0000-5ee0-000000000001'::UUID,
-      '00000000-0000-0000-5ee0-000000000001'::UUID
+      pg_temp.seed_actor()::UUID,
+      pg_temp.seed_actor()::UUID
     FROM
       seeded_orders so
   )
@@ -657,7 +719,7 @@ SELECT
   'RESTAURANT_' || so."restaurantId"::TEXT,
   so."totalAmount",
   'POS / Online order gross settlement',
-  '00000000-0000-0000-5ee0-000000000001'::UUID,
-  '00000000-0000-0000-5ee0-000000000001'::UUID
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
 FROM
   seeded_orders so;

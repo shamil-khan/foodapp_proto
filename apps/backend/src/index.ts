@@ -4,13 +4,18 @@ import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 import { requestId } from 'hono/request-id';
 import { createApp } from '@/app';
-import type { AppEnv } from '@/container';
+import { type AppEnv, rootContainer } from '@/container';
 import { globalErrorHandler } from '@/errorHandler';
 import { AppLogger, initLogger } from '@/logger';
 
 await initLogger();
 const bootLog = new AppLogger('startup');
 const httpLog = new AppLogger();
+
+const redis = rootContainer.get('redis');
+if (!redis.isOpen) {
+  await redis.connect();
+}
 
 const rootApp = new Hono<AppEnv>();
 

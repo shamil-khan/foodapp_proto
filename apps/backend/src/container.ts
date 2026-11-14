@@ -1,4 +1,10 @@
-import { type PlatformRole, pgPool, redisClient, type TenantRole } from '@foodapp/db';
+import {
+  type PlatformRole,
+  pgPool,
+  redisClient,
+  SYSTEM_ACTORS,
+  type TenantRole,
+} from '@foodapp/db';
 import type { InferdiHonoScopeEnv } from '@inferdi/hono';
 import { Container } from '@inferdi/inferdi';
 import { MenuCacheInvalidationHandler } from '@/contexts/catalog/application/cache-invalidation-handler';
@@ -326,7 +332,7 @@ export const rootContainer = new Container()
 const bootScope = rootContainer.createScope({
   request: {
     requestId: 'bootstrap',
-    actorId: '00000000-0000-0000-5150-000000000001',
+    actorId: SYSTEM_ACTORS.SYSTEM_CRON,
     actorSource: 'SYSTEM',
   },
   log: new AppLogger('bootstrap'),

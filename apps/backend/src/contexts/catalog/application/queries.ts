@@ -1,4 +1,10 @@
-import { RestaurantLayoutTable, RestaurantTable, type redisClient, sqlSelect } from '@foodapp/db';
+import {
+  RestaurantLayoutTable,
+  RestaurantTable,
+  type redisClient,
+  SYSTEM_ACTORS,
+  sqlSelect,
+} from '@foodapp/db';
 import type { Pool } from 'pg';
 import type { CompiledMenuSnapshot } from '@/contexts/catalog/domain/menu-snapshot-builder';
 import type { CatalogRepository } from '@/contexts/catalog/infrastructure/catalog-repository';
@@ -131,6 +137,10 @@ export class GetRestaurantMenuSnapshotHandler
   async execute(query: GetRestaurantMenuSnapshotQuery): Promise<CompiledMenuSnapshot | null> {
     const cacheKey = `menu:snapshot:${query.restaurantId}`;
 
+    if (!this.redis.isOpen) {
+      await this.redis.connect();
+    }
+
     const cached = await this.redis.get(cacheKey);
     if (cached) {
       return JSON.parse(cached) as CompiledMenuSnapshot;
@@ -146,7 +156,7 @@ export class GetRestaurantMenuSnapshotHandler
 
     const rebuilt = await this.catalogRepo.rebuildAndPersistSnapshot(
       query.restaurantId,
-      '00000000-0000-0000-5150-000000000001',
+      SYSTEM_ACTORS.SYSTEM_CRON,
     );
     if (rebuilt) {
       await this.redis.set(cacheKey, JSON.stringify(rebuilt), {

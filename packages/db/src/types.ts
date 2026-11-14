@@ -1,12 +1,12 @@
 export const SYSTEM_ACTORS = {
-  /** 5EE0 = SEED (Initial database seed script) */
-  SEED_SCRIPT: '00000000-0000-0000-5ee0-000000000001',
-  /** 5150 = SYS (Automated background cron & scheduled tasks) */
-  SYSTEM_CRON: '00000000-0000-0000-5150-000000000001',
-  /** B070 = BOT (Hardware POS & KDS printer webhooks) */
-  POS_WEBHOOK_BOT: '00000000-0000-0000-b070-000000000001',
-  /** A017 = AUDIT (Migration & schema backfill guard) */
-  MIGRATION_GUARD: '00000000-0000-0000-a017-000000000001',
+  /** 85EE = SEED (Initial database seed script) */
+  SEED_SCRIPT: '00000000-0000-4000-85ee-000000000001',
+  /** 8515 = SYS (Automated background cron & scheduled tasks) */
+  SYSTEM_CRON: '00000000-0000-4000-8515-000000000001',
+  /** 8B07 = BOT (Hardware POS & KDS printer webhooks) */
+  POS_WEBHOOK_BOT: '00000000-0000-4000-8b07-000000000001',
+  /** 8A01 = AUDIT (Migration & schema backfill guard) */
+  MIGRATION_GUARD: '00000000-0000-4000-8a01-000000000001',
 } as const;
 
 export type SystemActorId = (typeof SYSTEM_ACTORS)[keyof typeof SYSTEM_ACTORS];
