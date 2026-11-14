@@ -43,7 +43,10 @@ const CONFIG = {
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const result = { basePath: null, files: [] };
+  const result = {
+    basePath: null,
+    files: [],
+  };
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--path') result.basePath = args[++i];
@@ -66,7 +69,9 @@ function getOutputFile(basePath) {
   const outputFile = path.join(outputDir, `ai-context${fileSuffix}.txt`);
 
   if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
+    fs.mkdirSync(outputDir, {
+      recursive: true,
+    });
   }
   return outputFile;
 }
@@ -99,10 +104,7 @@ function getAllFiles(dirPath, arrayOfFiles = []) {
       const ext = path.extname(fullPath);
       const fileName = path.basename(fullPath);
 
-      if (
-        CONFIG.allowedExtensions.includes(ext) ||
-        fileName.startsWith('.env')
-      ) {
+      if (CONFIG.allowedExtensions.includes(ext) || fileName.startsWith('.env')) {
         arrayOfFiles.push(fullPath);
       }
     }
@@ -124,9 +126,7 @@ function main() {
   const outputFile = getOutputFile(basePath);
 
   const allFiles =
-    files.length > 0
-      ? files.map((f) => path.join(basePath, f))
-      : getAllFiles(searchPath);
+    files.length > 0 ? files.map((f) => path.join(basePath, f)) : getAllFiles(searchPath);
 
   let combinedContent = '';
 

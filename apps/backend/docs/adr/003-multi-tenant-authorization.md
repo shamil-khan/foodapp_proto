@@ -101,9 +101,71 @@ Combine **Option A** (`403` domain policy checks in handlers + `PLATFORM_ADMIN` 
 
 ---
 
-## 5. Planned Implementation Checklist (When Scheduled)
+# Implementation Plan: Multi-Tenant & Resource-Level Authorization
 
-1. **Login Tenant Binding:**
-   - Add `restaurantId: z.uuid()` to `PosLoginBodySchema` (`src/contexts/identity/services/identity-schemas.ts`).
-   - Pass `restaurantId` through `IdentityController.loginPosStaff` -> `LoginPosStaffCommand` -> `LoginPosStaffHandler` (`WHERE email = ? AND restaurantId = ?`).
-2. **Authorization Policy Service:**
+---
+
+## 1. Pre-Implementation Checklist
+
+- [ ] Review architectural options in `002-multi-tenant-authorization.md` (`Option A`, `Option B`, `Option C`) and confirm the final choice before generating code.
+- [ ] Verify whether any new npm packages are needed (none expected; uses existing `@inferdi/inferdi`, `@hono/zod-openapi`, and `@foodapp/db`).
+- [ ] Scaffold any new files (`src/contexts/identity/application/tenant-authorization.ts`) via terminal command before writing code.
+
+---
+
+## 2. Step-by-Step Implementation Tasks
+
+### Task 1: Enforce Tenant Binding at POS Staff Login (`POST /api/pos/auth/login`)
+
+- [ ] **`src/contexts/identity/services/identity-schemas.ts`:**
+  - Add `restaurantId: z.uuid()` as a required field in `PosLoginBodySchema`.
+- [ ] **`src/contexts/identity/services/identity-controller.ts`:**
+  - Pass `restaurantId: body.restaurantId` in the `LoginPosStaff` command dispatch.
+- [ ] **`src/contexts/identity/application/pos-login-command.ts`:**
+  - Add `readonly restaurantId: string` to `LoginPosStaffCommand`.
+  - Update `LoginPosStaffHandler` SQL query (`RestaurantStaffTable`) to filter by both `cols.email` and `cols.restaurantId` (`WHERE email = ? AND restaurantId = ?`).
+
+### Task 2: Create Request-Scoped `TenantAuthorizationService`
+
+- [ ] **`src/contexts/identity/application/tenant-authorization.ts`:**
+  - Implement `TenantAuthorizationService` accepting `request: RequestContext`.
+  - Enforce tenant access rules returning `Result<void, DomainError>`:
+    - `PLATFORM_ADMIN` (`GLOBAL_USER`) -> `ok(undefined)` (permitted across tenants).
+    - `POS_STAFF` -> requires `request.restaurantId === targetRestaurantId`; otherwise returns `err(new DomainError('TENANT_FORBIDDEN', 'Access denied for target restaurant.', 403))`.
+    - `GLOBAL_USER` (`CUSTOMER`) -> requires `request.actorId === targetUserId`; otherwise returns `err(new DomainError('USER_FORBIDDEN', 'Access denied for target user resource.', 403))`.
+- [ ] **`src/container.ts`:**
+  - Register `'tenantAuthz'` (`TenantAuthorizationService`, `['request']`, `'scoped'`) and inject it into scoped command/query handlers.
+
+### Task 3: Enforce Cross-Tenant Ownership in Command & Query Handlers
+
+- [ ] **Catalog (`src/contexts/catalog/application/commands.ts`):**
+  - `UpdateMenuItemPriceHandler`: Look up item's `restaurantId` prior to mutation and call `tenantAuthz.assertRestaurantAccess(restaurantId)` -> return `403` on mismatch.
+- [ ] **Ordering (`src/contexts/ordering/application/commands.ts` & `queries.ts`):**
+  - `PlacePosOrderHandler`: Verify `tenantAuthz.assertRestaurantAccess(cmd.restaurantId)` so `POS_STAFF` cannot submit orders for another restaurant.
+  - `SettlePosOrderHandler`: After loading the order aggregate, verify `tenantAuthz.assertRestaurantAccess(order.snapshot.restaurantId)` before calling `order.settleBill(...)`.
+  - `GetRestaurantOrdersHandler`: Verify `tenantAuthz.assertRestaurantAccess(query.restaurantId)`.
+- [ ] **Ledger (`src/contexts/ledger/application/queries.ts`):**
+  - `GetRestaurantLedgerHandler`: Verify `tenantAuthz.assertRestaurantAccess(query.restaurantId)`.
+
+### Task 4: OpenAPI 3.1 Schema & Controller Status Mapping
+
+- [ ] **Controllers (`catalog-controller.ts`, `order-controller.ts`, `ledger-controller.ts`):**
+  - Map `result.error.statusCode === 403` cleanly in HTTP JSON responses.
+- [ ] **Schemas (`order-schemas.ts`, `catalog-schemas.ts`, `ledger-schemas.ts`):**
+  - Document `403` (`DomainErrorResponseSchema`) on `POST /api/pos/orders`, `GET /api/pos/orders`, and `POST /api/pos/orders/{id}/settle`.
+
+---
+
+## 3. Verification & Completion Deliverable (`done.md`)
+
+- [ ] **Code Quality:**
+
+  ```bash
+  pn fixed
+  pnpm --filter @foodapp/backend exec tsc --noEmit
+  ```
+- [ ] **Negative Cross-Tenant `curl` Tests:**
+  - Attempt `POST /api/pos/auth/login` with Restaurant 2 staff email + Restaurant 1 `restaurantId` -> verify `401 INVALID_CREDENTIALS`.
+  - Authenticate as Restaurant 2 staff, then attempt `POST /api/pos/orders/:restaurant1OrderId/settle` or `PATCH /api/restaurants/items/:restaurant1ItemId/price` -> verify `403 TENANT_FORBIDDEN`.
+- [ ] **Generate Completion Record:**
+  - Create `apps/backend/docs/adr/002-multi-tenant-authorization-done.md` documenting all chosen options, setup steps, implemented files, and verified `curl` outputs.
