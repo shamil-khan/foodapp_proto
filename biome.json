@@ -15,7 +15,14 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!**/dist", "!**/android", "!**/ios"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/android",
+      "!**/ios",
+      "!**/routeTree.gen.ts",
+      "!**/*.generated.ts"
+    ]
   },
   "formatter": {
     "enabled": true,

@@ -240,6 +240,13 @@ Run this command after installing new npm packages, changing `vite.config.ts`, o
 pnpm --filter frontend cap:sync
 ```
 
+**Remember:** before sync, the ios and android builds are already added, if not do it first
+
+```bash
+   pnpm --filter frontend exec cap add android
+   pnpm --filter frontend exec cap add ios
+```
+
 ### What This Verifies Automatically on Linux:
 
 1. **`CAPACITOR_BUILD=true tsc -b && vite build`**: Confirms TypeScript and Vite compile cleanly with `VitePWA` disabled.

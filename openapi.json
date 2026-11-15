@@ -1,0 +1,933 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "FoodApp UK POS & Storefront API",
+    "version": "1.0.0",
+    "description": "Multi-tenant UK Restaurant POS, Storefront Catalog, Ordering, and Double-Entry Financial/Loyalty Ledger API."
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Bearer token authentication. Accepts either a POS Staff shift JWT (`pos_staff_token`) or a Better Auth Global User session token."
+      }
+    },
+    "schemas": {
+      "PosLoginResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "enum": [true] },
+          "token": { "type": "string", "description": "HS256 POS shift JWT (12h TTL)" },
+          "staff": { "$ref": "#/components/schemas/PosStaffClaims" }
+        },
+        "required": ["success", "token", "staff"]
+      },
+      "PosStaffClaims": {
+        "type": "object",
+        "properties": {
+          "staffId": { "type": "string", "format": "uuid" },
+          "restaurantId": { "type": "string", "format": "uuid" },
+          "role": { "type": "string", "enum": ["OWNER", "ADMIN", "MANAGER", "ORDER_TAKER"] },
+          "name": { "type": "string" },
+          "email": { "type": "string", "format": "email" }
+        },
+        "required": ["staffId", "restaurantId", "role", "name", "email"]
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string", "enum": ["VALIDATION_ERROR"] },
+          "error": { "type": "string" },
+          "issues": { "type": "array", "items": { "$ref": "#/components/schemas/ValidationIssue" } }
+        },
+        "required": ["code", "error", "issues"]
+      },
+      "ValidationIssue": {
+        "type": "object",
+        "properties": { "path": { "type": "string" }, "message": { "type": "string" } },
+        "required": ["path", "message"]
+      },
+      "DomainErrorResponse": {
+        "type": "object",
+        "properties": { "code": { "type": "string" }, "error": { "type": "string" } },
+        "required": ["error"]
+      },
+      "PosLoginBody": {
+        "type": "object",
+        "properties": {
+          "email": { "type": "string", "format": "email", "example": "manager@spicegarden.co.uk" },
+          "password": { "type": "string", "minLength": 1, "example": "ShiftPass123!" }
+        },
+        "required": ["email", "password"]
+      },
+      "SuccessFlagResponse": {
+        "type": "object",
+        "properties": { "success": { "type": "boolean", "enum": [true] } },
+        "required": ["success"]
+      },
+      "GetCurrentActorResponse": {
+        "type": "object",
+        "properties": { "actor": { "$ref": "#/components/schemas/ActiveActorProfile" } },
+        "required": ["actor"]
+      },
+      "ActiveActorProfile": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "source": { "type": "string", "enum": ["GLOBAL_USER", "POS_STAFF", "SYSTEM"] },
+          "name": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "role": { "type": "string" },
+          "restaurantId": { "type": "string", "format": "uuid" }
+        },
+        "required": ["id", "source", "name", "email", "role"]
+      },
+      "ListRestaurantsResponse": {
+        "type": "object",
+        "properties": {
+          "restaurants": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/StorefrontRestaurant" }
+          }
+        },
+        "required": ["restaurants"]
+      },
+      "StorefrontRestaurant": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "postcodeSector": { "type": "string", "example": "E1 6" },
+          "foodHygieneRating": { "type": ["integer", "null"] },
+          "averagePrepTimeMinutes": { "type": "integer" },
+          "branding": {
+            "type": ["object", "null"],
+            "properties": {
+              "templateId": { "type": "string" },
+              "primaryColor": { "type": "string" },
+              "bannerUrl": { "type": ["string", "null"] }
+            },
+            "required": ["templateId", "primaryColor", "bannerUrl"]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "postcodeSector",
+          "foodHygieneRating",
+          "averagePrepTimeMinutes",
+          "branding"
+        ]
+      },
+      "CompiledMenuSnapshot": {
+        "type": "object",
+        "properties": {
+          "restaurantId": { "type": "string", "format": "uuid" },
+          "restaurantName": { "type": "string" },
+          "postcodeSector": { "type": "string" },
+          "versionHash": { "type": "string" },
+          "generatedAt": { "type": "string" },
+          "categories": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SnapshotCategory" }
+          }
+        },
+        "required": [
+          "restaurantId",
+          "restaurantName",
+          "postcodeSector",
+          "versionHash",
+          "generatedAt",
+          "categories"
+        ]
+      },
+      "SnapshotCategory": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "sortWeight": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/SnapshotMenuItem" } }
+        },
+        "required": ["id", "name", "sortWeight", "items"]
+      },
+      "SnapshotMenuItem": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "basePrice": { "type": "number" },
+          "vatRate": { "type": "number" },
+          "allergenFlags": { "type": "array", "items": { "type": "string" } },
+          "kdsTarget": {
+            "type": "string",
+            "enum": ["KITCHEN_SCREEN", "BAR_PRINTER", "PASTRY_STATION"]
+          },
+          "imageUrl": { "type": ["string", "null"] },
+          "modifiers": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SnapshotModifier" }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "basePrice",
+          "vatRate",
+          "allergenFlags",
+          "kdsTarget",
+          "imageUrl",
+          "modifiers"
+        ]
+      },
+      "SnapshotModifier": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "extraPrice": { "type": "number" }
+        },
+        "required": ["id", "name", "extraPrice"]
+      },
+      "UpdateMenuItemPriceResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "enum": [true] },
+          "menuItemId": { "type": "string", "format": "uuid" }
+        },
+        "required": ["success", "menuItemId"]
+      },
+      "UpdateMenuItemPriceBody": {
+        "type": "object",
+        "properties": {
+          "newBasePrice": { "type": "number", "minimum": 0, "example": 12.99 },
+          "expectedRowVersion": { "type": "integer", "minimum": 1, "example": 1 }
+        },
+        "required": ["newBasePrice", "expectedRowVersion"]
+      },
+      "ListPosOrdersResponse": {
+        "type": "object",
+        "properties": {
+          "orders": { "type": "array", "items": { "$ref": "#/components/schemas/PosOrderSummary" } }
+        },
+        "required": ["orders"]
+      },
+      "PosOrderSummary": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "restaurantId": { "type": "string", "format": "uuid" },
+          "diningTableId": { "type": ["string", "null"], "format": "uuid" },
+          "orderSource": { "type": "string" },
+          "paymentMethod": { "type": "string" },
+          "subtotal": { "type": "string" },
+          "vatTotal": { "type": "string" },
+          "tipAmount": { "type": "string" },
+          "totalAmount": { "type": "string" },
+          "rowVersion": { "type": "integer" },
+          "latestMilestone": { "type": "string" },
+          "createdAt": { "type": "string" }
+        },
+        "required": [
+          "id",
+          "restaurantId",
+          "diningTableId",
+          "orderSource",
+          "paymentMethod",
+          "subtotal",
+          "vatTotal",
+          "tipAmount",
+          "totalAmount",
+          "rowVersion",
+          "latestMilestone",
+          "createdAt"
+        ]
+      },
+      "PlacePosOrderResponse": {
+        "type": "object",
+        "properties": {
+          "orderId": { "type": "string", "format": "uuid" },
+          "kdsTickets": { "$ref": "#/components/schemas/KdsTicketOutput" }
+        },
+        "required": ["orderId", "kdsTickets"]
+      },
+      "KdsTicketOutput": {
+        "type": "object",
+        "properties": {
+          "orderId": { "type": "string", "format": "uuid" },
+          "tableId": { "type": "string", "format": "uuid" },
+          "stationSlips": {
+            "type": "object",
+            "properties": {
+              "KITCHEN_SCREEN": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/KdsStationSlip" }
+              },
+              "BAR_PRINTER": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/KdsStationSlip" }
+              },
+              "PASTRY_STATION": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/KdsStationSlip" }
+              }
+            },
+            "required": ["KITCHEN_SCREEN", "BAR_PRINTER", "PASTRY_STATION"]
+          }
+        },
+        "required": ["orderId", "stationSlips"]
+      },
+      "KdsStationSlip": {
+        "type": "object",
+        "properties": {
+          "itemName": { "type": "string" },
+          "qty": { "type": "integer" },
+          "mods": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["itemName", "qty", "mods"]
+      },
+      "PlacePosOrderBody": {
+        "type": "object",
+        "properties": {
+          "clientOrderId": { "type": "string" },
+          "restaurantId": { "type": "string", "format": "uuid" },
+          "diningTableId": { "type": "string", "format": "uuid" },
+          "customerId": { "type": "string", "format": "uuid" },
+          "orderSource": {
+            "type": "string",
+            "enum": ["DINE_IN", "TAKEAWAY", "DELIVERY", "QR_TABLE"],
+            "default": "DINE_IN"
+          },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/OrderLineInput" },
+            "minItems": 1
+          }
+        },
+        "required": ["items"]
+      },
+      "OrderLineInput": {
+        "type": "object",
+        "properties": {
+          "menuItemId": { "type": "string", "format": "uuid" },
+          "quantity": { "type": "integer", "minimum": 1 },
+          "modifierIds": { "type": "array", "items": { "type": "string", "format": "uuid" } }
+        },
+        "required": ["menuItemId", "quantity"]
+      },
+      "SettlePosOrderResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "enum": [true] },
+          "orderId": { "type": "string", "format": "uuid" }
+        },
+        "required": ["success", "orderId"]
+      },
+      "SettlePosOrderBody": {
+        "type": "object",
+        "properties": {
+          "paymentMethod": { "type": "string", "enum": ["CASH", "CARD_TERMINAL", "ONLINE_STRIPE"] },
+          "tipAmount": { "type": "number", "minimum": 0, "default": 0 }
+        },
+        "required": ["paymentMethod"]
+      },
+      "GetRestaurantLedgerResponse": {
+        "type": "object",
+        "properties": {
+          "entries": { "type": "array", "items": { "$ref": "#/components/schemas/LedgerEntry" } }
+        },
+        "required": ["entries"]
+      },
+      "LedgerEntry": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "orderId": { "type": ["string", "null"], "format": "uuid" },
+          "entityName": { "type": "string" },
+          "creditAmount": { "type": "string" },
+          "debitAmount": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "createdAt": { "type": "string" }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "entityName",
+          "creditAmount",
+          "debitAmount",
+          "description",
+          "createdAt"
+        ]
+      },
+      "GetUserLoyaltyBalanceResponse": {
+        "type": "object",
+        "properties": {
+          "totalPoints": { "type": "integer" },
+          "history": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/LoyaltyTransaction" }
+          }
+        },
+        "required": ["totalPoints", "history"]
+      },
+      "LoyaltyTransaction": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "restaurantId": { "type": ["string", "null"], "format": "uuid" },
+          "orderId": { "type": ["string", "null"], "format": "uuid" },
+          "txType": { "type": "string", "enum": ["EARNED", "REDEEMED"] },
+          "pointsDelta": { "type": "integer" },
+          "createdAt": { "type": "string" }
+        },
+        "required": ["id", "restaurantId", "orderId", "txType", "pointsDelta", "createdAt"]
+      },
+      "RedeemLoyaltyPointsResponse": {
+        "type": "object",
+        "properties": { "remainingBalance": { "type": "integer" } },
+        "required": ["remainingBalance"]
+      },
+      "RedeemLoyaltyPointsBody": {
+        "type": "object",
+        "properties": {
+          "restaurantId": { "type": "string", "format": "uuid" },
+          "orderId": { "type": "string", "format": "uuid" },
+          "pointsToRedeem": { "type": "integer", "minimum": 1, "example": 250 }
+        },
+        "required": ["pointsToRedeem"]
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["ok"] },
+          "service": { "type": "string", "enum": ["foodapp-backend"] },
+          "datetime": { "type": "string" }
+        },
+        "required": ["status", "service", "datetime"]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/api/pos/auth/login": {
+      "post": {
+        "tags": ["Identity"],
+        "summary": "Authenticate POS tenant staff and issue 12-hour shift JWT",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PosLoginBody" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated POS staff session",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/PosLoginResponse" } }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid POS staff credentials",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pos/auth/logout": {
+      "post": {
+        "tags": ["Identity"],
+        "summary": "Clear POS staff shift cookie session",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Shift session cleared",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SuccessFlagResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me": {
+      "get": {
+        "tags": ["Identity"],
+        "summary": "Get currently authenticated actor (Better Auth Global User or POS Staff JWT)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Active actor profile",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GetCurrentActorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/restaurants": {
+      "get": {
+        "tags": ["Catalog"],
+        "summary": "List active storefront restaurants (optionally filtered by UK postcode sector)",
+        "parameters": [
+          {
+            "schema": { "type": ["integer", "null"], "minimum": 0, "example": 0 },
+            "required": false,
+            "name": "skip",
+            "in": "query"
+          },
+          {
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "example": 20 },
+            "required": false,
+            "name": "take",
+            "in": "query"
+          },
+          {
+            "schema": { "type": "string", "example": "SW1A" },
+            "required": false,
+            "name": "postcodeSector",
+            "in": "query"
+          },
+          {
+            "schema": { "type": "string", "example": "Curry" },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active restaurants matching filters",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ListRestaurantsResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/restaurants/{restaurantId}/menu": {
+      "get": {
+        "tags": ["Catalog"],
+        "summary": "Fetch compiled menu snapshot for a restaurant",
+        "parameters": [
+          {
+            "schema": { "type": "string", "format": "uuid" },
+            "required": true,
+            "name": "restaurantId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Compiled menu snapshot",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CompiledMenuSnapshot" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid restaurantId UUID",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "Restaurant menu not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/restaurants/items/{itemId}/price": {
+      "patch": {
+        "tags": ["Catalog"],
+        "summary": "Update menu item base price with optimistic concurrency check (POS Staff)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "schema": { "type": "string", "format": "uuid" },
+            "required": true,
+            "name": "itemId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateMenuItemPriceBody" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Menu item price updated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UpdateMenuItemPriceResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid price or validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized POS staff session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden tenant role",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          },
+          "409": {
+            "description": "Optimistic locking concurrency conflict",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pos/orders": {
+      "get": {
+        "tags": ["Ordering"],
+        "summary": "List recent POS orders for the active restaurant",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "schema": { "type": "string", "format": "uuid" },
+            "required": false,
+            "name": "restaurantId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restaurant POS orders",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ListPosOrdersResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing restaurantId or invalid query",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized POS staff session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Ordering"],
+        "summary": "Place a new POS order and dispatch KDS station slips",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PlacePosOrderBody" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Order created and KDS tickets generated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PlacePosOrderResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or domain error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized POS staff session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "Menu item unavailable or not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pos/orders/{id}/settle": {
+      "post": {
+        "tags": ["Ordering"],
+        "summary": "Settle an open POS order bill and trigger financial ledger saga",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "schema": { "type": "string", "format": "uuid" },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/SettlePosOrderBody" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Order settled",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SettlePosOrderResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid order state transition or validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized POS staff session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "Order not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ledger/restaurant": {
+      "get": {
+        "tags": ["Ledger & Loyalty"],
+        "summary": "Get double-entry financial ledger for a restaurant (OWNER & ADMIN only)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "schema": { "type": ["integer", "null"], "minimum": 0, "example": 0 },
+            "required": false,
+            "name": "skip",
+            "in": "query"
+          },
+          {
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "example": 20 },
+            "required": false,
+            "name": "take",
+            "in": "query"
+          },
+          {
+            "schema": { "type": "string", "format": "uuid" },
+            "required": false,
+            "name": "restaurantId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Financial ledger entries",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GetRestaurantLedgerResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing restaurantId or invalid query",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized POS staff session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden: requires OWNER or ADMIN role",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ledger/loyalty/me": {
+      "get": {
+        "tags": ["Ledger & Loyalty"],
+        "summary": "Get current customer loyalty point balance and transaction history",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Customer loyalty summary",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GetUserLoyaltyBalanceResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized customer session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ledger/loyalty/redeem": {
+      "post": {
+        "tags": ["Ledger & Loyalty"],
+        "summary": "Redeem customer loyalty points",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RedeemLoyaltyPointsBody" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Points redeemed and remaining balance returned",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RedeemLoyaltyPointsResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Insufficient points or validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationErrorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized customer session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DomainErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": ["Platform"],
+        "summary": "Backend service health check",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HealthResponse" } }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {}
+}
