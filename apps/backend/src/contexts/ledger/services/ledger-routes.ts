@@ -1,6 +1,6 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@/container';
-import { requireGlobalUser, requirePosStaff } from '@/contexts/identity/services/auth-middleware';
+import { requirePermission } from '@/contexts/identity/services/auth-middleware';
 import {
   getMyLoyaltyBalanceRoute,
   getRestaurantLedgerRoute,
@@ -12,24 +12,14 @@ export const ledgerRoutes = new OpenAPIHono<AppEnv>({
   defaultHook: openApiValidationHook,
 });
 
-ledgerRoutes.use(
-  '/restaurant',
-  requirePosStaff([
-    'OWNER',
-    'ADMIN',
-  ]),
-);
+ledgerRoutes.use('/restaurant', requirePermission('ledger:read'));
 
 ledgerRoutes.openapi(getRestaurantLedgerRoute, (c) =>
   c.var.di.get('ledgerController').getRestaurantLedger(c, c.req.valid('query')),
 );
 
-ledgerRoutes.use(
-  '/loyalty/*',
-  requireGlobalUser([
-    'CUSTOMER',
-  ]),
-);
+ledgerRoutes.use('/loyalty/me', requirePermission('loyalty:read'));
+ledgerRoutes.use('/loyalty/redeem', requirePermission('loyalty:redeem'));
 
 ledgerRoutes.openapi(getMyLoyaltyBalanceRoute, (c) =>
   c.var.di.get('ledgerController').getMyLoyaltyBalance(c),

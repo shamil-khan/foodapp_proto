@@ -1,11 +1,19 @@
 import * as crypto from 'node:crypto';
-import { RestaurantStaffTable, sqlSelect, type TenantRole } from '@foodapp/db';
+import {
+  DEFAULT_ROLE_PERMISSIONS,
+  RestaurantStaffTable,
+  RestaurantTable,
+  sqlSelect,
+  type TenantRole,
+} from '@foodapp/db';
 import type { Pool } from 'pg';
 import type { PosStaffSessionClaims } from '@/contexts/identity/domain/auth-actor';
+import type { RolePermissionCache } from '@/contexts/identity/infrastructure/role-permission-cache';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
 
 export interface LoginPosStaffCommand extends Command<Result<PosStaffSessionClaims>> {
+  readonly subdomain: string;
   readonly email: string;
   readonly password: string;
 }
@@ -13,7 +21,6 @@ export interface LoginPosStaffCommand extends Command<Result<PosStaffSessionClai
 function verifyStaffPassword(plainPassword: string, storedHash: string): boolean {
   if (!plainPassword || !storedHash) return false;
 
-  // Verify `salt:hexKey` scrypt hashes (Better Auth / Node crypto standard)
   const parts = storedHash.split(':');
   if (parts.length === 2) {
     const [salt, keyHex] = parts;
@@ -22,22 +29,54 @@ function verifyStaffPassword(plainPassword: string, storedHash: string): boolean
     return keyBuffer.length === derivedKey.length && crypto.timingSafeEqual(keyBuffer, derivedKey);
   }
 
-  // Allow seeded SQL placeholder hashes strictly in local development
   if (process.env.NODE_ENV !== 'production' && storedHash.startsWith('$2')) {
     return plainPassword.length >= 6;
   }
 
   return false;
 }
-
 export class LoginPosStaffHandler
   implements CommandHandler<LoginPosStaffCommand, Result<PosStaffSessionClaims>>
 {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly rolePermissionCache: RolePermissionCache,
+  ) {}
 
   async execute(cmd: LoginPosStaffCommand): Promise<Result<PosStaffSessionClaims>> {
-    const { cols } = RestaurantStaffTable;
+    const cleanSubdomain = cmd.subdomain.trim().toLowerCase();
+    const rCols = RestaurantTable.cols;
 
+    const restQuery = sqlSelect(RestaurantTable)
+      .select([
+        rCols.id,
+        rCols.subdomain,
+        rCols.isActiveOverride,
+      ])
+      .whereEq(rCols.subdomain, cleanSubdomain)
+      .activeOnly()
+      .compile();
+
+    const restRes = await this.pool.query<typeof restQuery._result>(
+      restQuery.text,
+      restQuery.params,
+    );
+    const restaurant = restRes.rows[0];
+    if (!restaurant) {
+      return err(new DomainError('INVALID_CREDENTIALS', 'Invalid POS staff credentials.', 401));
+    }
+
+    if (!restaurant.isActiveOverride) {
+      return err(
+        new DomainError(
+          'TENANT_SUSPENDED',
+          'This restaurant account is currently suspended. Contact platform support.',
+          403,
+        ),
+      );
+    }
+
+    const { cols } = RestaurantStaffTable;
     const staffQuery = sqlSelect(RestaurantStaffTable)
       .select([
         cols.id,
@@ -45,8 +84,10 @@ export class LoginPosStaffHandler
         cols.email,
         cols.name,
         cols.role,
+        cols.roleId,
         cols.passwordHash,
       ])
+      .whereEq(cols.restaurantId, restaurant.id)
       .whereEq(cols.email, cmd.email.trim().toLowerCase())
       .activeOnly()
       .compile();
@@ -61,12 +102,20 @@ export class LoginPosStaffHandler
       return err(new DomainError('INVALID_CREDENTIALS', 'Invalid POS staff credentials.', 401));
     }
 
+    const fallbackRole = staff.role as TenantRole;
+    const resolvedPermissions = staff.roleId
+      ? await this.rolePermissionCache.getPermissionsForRole(staff.roleId)
+      : (DEFAULT_ROLE_PERMISSIONS[fallbackRole] ?? []);
+
     return ok({
       staffId: staff.id,
       restaurantId: staff.restaurantId,
-      role: staff.role as TenantRole,
+      subdomain: restaurant.subdomain,
+      roleId: staff.roleId ?? '',
+      role: fallbackRole,
       name: staff.name,
       email: staff.email,
+      permissions: resolvedPermissions,
     });
   }
 }

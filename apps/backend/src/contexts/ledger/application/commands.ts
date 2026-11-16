@@ -1,9 +1,9 @@
 import * as crypto from 'node:crypto';
 import { LoyaltyLedgerTable, sqlSelect } from '@foodapp/db';
 import type { Pool } from 'pg';
-import type { RequestContext } from '@/container';
 import { FinancialLedgerAggregate } from '@/contexts/ledger/domain/ledger-aggregate';
 import type { LedgerRepository } from '@/contexts/ledger/infrastructure/ledger-repository';
+import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
 
@@ -96,6 +96,7 @@ export class RedeemLoyaltyPointsHandler
   constructor(
     private readonly pool: Pool,
     private readonly ledgerRepo: LedgerRepository,
+    private readonly authz: AuthorizationPolicy,
     private readonly request: RequestContext,
   ) {}
 
@@ -104,6 +105,11 @@ export class RedeemLoyaltyPointsHandler
       remainingBalance: number;
     }>
   > {
+    const access = this.authz.assertUserAccess(cmd.userId, 'loyalty:redeem');
+    if (!access.ok) {
+      return access;
+    }
+
     if (cmd.pointsToRedeem <= 0) {
       return err(new DomainError('INVALID_POINTS', 'Points to redeem must be positive.'));
     }

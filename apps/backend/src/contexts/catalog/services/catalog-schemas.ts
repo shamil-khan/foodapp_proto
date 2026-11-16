@@ -2,6 +2,7 @@ import { createRoute, z } from '@hono/zod-openapi';
 import {
   DomainErrorResponseSchema,
   PaginationQuerySchema,
+  SuccessFlagResponseSchema,
   ValidationErrorResponseSchema,
 } from '@/core/services/openapi-shared';
 
@@ -9,6 +10,9 @@ export const StorefrontRestaurantSchema = z
   .object({
     id: z.uuid(),
     name: z.string(),
+    subdomain: z.string().openapi({
+      example: 'westminster-patty',
+    }),
     postcodeSector: z.string().openapi({
       example: 'E1 6',
     }),
@@ -23,6 +27,20 @@ export const StorefrontRestaurantSchema = z
       .nullable(),
   })
   .openapi('StorefrontRestaurant');
+
+export const SubdomainParamSchema = z.object({
+  subdomain: z
+    .string()
+    .min(2)
+    .max(63)
+    .openapi({
+      param: {
+        name: 'subdomain',
+        in: 'path',
+      },
+      example: 'westminster-patty',
+    }),
+});
 
 export const ListRestaurantsQuerySchema = PaginationQuerySchema.extend({
   postcodeSector: z
@@ -116,7 +134,6 @@ export const CompiledMenuSnapshotSchema = z
     categories: z.array(SnapshotCategorySchema),
   })
   .openapi('CompiledMenuSnapshot');
-
 export const UpdateMenuItemPriceBodySchema = z
   .object({
     newBasePrice: z.number().min(0).openapi({
@@ -135,13 +152,50 @@ export const UpdateMenuItemPriceResponseSchema = z
   })
   .openapi('UpdateMenuItemPriceResponse');
 
+export const CreateRestaurantByAdminBodySchema = z
+  .object({
+    name: z.string().min(2).max(120).openapi({
+      example: 'Subway Soho',
+    }),
+    subdomain: z
+      .string()
+      .min(2)
+      .max(63)
+      .regex(/^[a-z0-9-]+$/i)
+      .openapi({
+        example: 'subway',
+      }),
+    postcodeSector: z.string().min(2).max(10).openapi({
+      example: 'W1D',
+    }),
+    ownerName: z.string().min(2).max(100).openapi({
+      example: 'Subway Soho Owner',
+    }),
+    ownerEmail: z.email().openapi({
+      example: 'owner@subway-soho.co.uk',
+    }),
+    ownerPassword: z.string().min(8).openapi({
+      example: 'OwnerPass123!',
+    }),
+    platformFeeRate: z.number().min(0).max(50).optional().openapi({
+      example: 12.5,
+    }),
+  })
+  .openapi('CreateRestaurantByAdminBody');
+
+export const UpdateRestaurantStatusBodySchema = z
+  .object({
+    isActive: z.boolean(),
+  })
+  .openapi('UpdateRestaurantStatusBody');
+
 export const listRestaurantsRoute = createRoute({
   method: 'get',
   path: '/',
   tags: [
     'Catalog',
   ],
-  summary: 'List active storefront restaurants (optionally filtered by UK postcode sector)',
+  summary: 'List active storefront restaurants',
   request: {
     query: ListRestaurantsQuerySchema,
   },
@@ -159,6 +213,38 @@ export const listRestaurantsRoute = createRoute({
       content: {
         'application/json': {
           schema: ValidationErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const getRestaurantBySubdomainRoute = createRoute({
+  method: 'get',
+  path: '/by-subdomain/{subdomain}',
+  tags: [
+    'Catalog',
+  ],
+  summary: 'Resolve active storefront restaurant by URL subdomain (e.g. subway from ://fapp.com)',
+  request: {
+    params: SubdomainParamSchema,
+  },
+  responses: {
+    200: {
+      description: 'Resolved storefront restaurant',
+      content: {
+        'application/json': {
+          schema: z.object({
+            restaurant: StorefrontRestaurantSchema,
+          }),
+        },
+      },
+    },
+    404: {
+      description: 'Restaurant subdomain not found or inactive',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
         },
       },
     },
@@ -184,14 +270,6 @@ export const getMenuSnapshotRoute = createRoute({
         },
       },
     },
-    400: {
-      description: 'Invalid restaurantId UUID',
-      content: {
-        'application/json': {
-          schema: ValidationErrorResponseSchema,
-        },
-      },
-    },
     404: {
       description: 'Restaurant menu not found',
       content: {
@@ -202,14 +280,13 @@ export const getMenuSnapshotRoute = createRoute({
     },
   },
 });
-
 export const updateItemPriceRoute = createRoute({
   method: 'patch',
   path: '/items/{itemId}/price',
   tags: [
     'Catalog',
   ],
-  summary: 'Update menu item base price with optimistic concurrency check (POS Staff)',
+  summary: 'Update menu item base price (requires catalog:price:update right & matching tenant)',
   security: [
     {
       bearerAuth: [],
@@ -236,7 +313,7 @@ export const updateItemPriceRoute = createRoute({
       },
     },
     400: {
-      description: 'Invalid price or validation error',
+      description: 'Validation error',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -244,7 +321,7 @@ export const updateItemPriceRoute = createRoute({
       },
     },
     401: {
-      description: 'Unauthorized POS staff session',
+      description: 'Unauthorized',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -252,7 +329,15 @@ export const updateItemPriceRoute = createRoute({
       },
     },
     403: {
-      description: 'Forbidden tenant role',
+      description: 'Forbidden tenant or missing catalog:price:update right',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Menu item not found',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -260,7 +345,120 @@ export const updateItemPriceRoute = createRoute({
       },
     },
     409: {
-      description: 'Optimistic locking concurrency conflict',
+      description: 'Optimistic locking conflict',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const createRestaurantByAdminRoute = createRoute({
+  method: 'post',
+  path: '/restaurants',
+  tags: [
+    'Platform Admin',
+  ],
+  summary: 'Register a new restaurant with unique subdomain, default roles, and owner account',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: CreateRestaurantByAdminBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Restaurant registered',
+      content: {
+        'application/json': {
+          schema: z.object({
+            restaurantId: z.uuid(),
+            subdomain: z.string(),
+            ownerStaffId: z.uuid(),
+          }),
+        },
+      },
+    },
+    400: {
+      description: 'Validation error',
+      content: {
+        'application/json': {
+          schema: ValidationErrorResponseSchema,
+        },
+      },
+    },
+    403: {
+      description: 'Forbidden: PLATFORM_ADMIN required',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Subdomain already taken',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const updateRestaurantStatusByAdminRoute = createRoute({
+  method: 'patch',
+  path: '/restaurants/{restaurantId}/status',
+  tags: [
+    'Platform Admin',
+  ],
+  summary: 'Activate or suspend a restaurant tenant (PLATFORM_ADMIN only)',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    params: RestaurantIdParamSchema,
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: UpdateRestaurantStatusBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Restaurant status updated',
+      content: {
+        'application/json': {
+          schema: SuccessFlagResponseSchema,
+        },
+      },
+    },
+    403: {
+      description: 'Forbidden: PLATFORM_ADMIN required',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Restaurant not found',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,

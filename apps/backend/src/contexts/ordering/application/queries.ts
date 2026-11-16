@@ -1,6 +1,8 @@
 import { OrderMilestoneLogTable, OrderTable, sqlSelect } from '@foodapp/db';
 import type { Pool } from 'pg';
+import type { AuthorizationPolicy } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
+import { DomainError } from '@/core/domain/result';
 
 export interface PosOrderSummaryDto {
   id: string;
@@ -26,11 +28,18 @@ export interface GetRestaurantOrdersQuery extends Query<PosOrderSummaryDto[]> {
 export class GetRestaurantOrdersHandler
   implements QueryHandler<GetRestaurantOrdersQuery, PosOrderSummaryDto[]>
 {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly authz: AuthorizationPolicy,
+  ) {}
 
   async execute(query: GetRestaurantOrdersQuery): Promise<PosOrderSummaryDto[]> {
-    const { cols } = OrderTable;
+    const access = this.authz.assertRestaurantAccess(query.restaurantId, 'orders:read');
+    if (!access.ok) {
+      throw new DomainError(access.error.code, access.error.message, 403);
+    }
 
+    const { cols } = OrderTable;
     const ordersQuery = sqlSelect(OrderTable)
       .select([
         cols.id,
@@ -61,7 +70,6 @@ export class GetRestaurantOrdersHandler
       return [];
     }
 
-    // Batch-fetch milestones for all returned orders in 1 query using typed metadata
     const mCols = OrderMilestoneLogTable.cols;
     const milestonesQuery = sqlSelect(OrderMilestoneLogTable)
       .select([

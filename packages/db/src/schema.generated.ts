@@ -1301,6 +1301,7 @@ export interface RestaurantRow {
   updatedBy: string | null;
   deletedAt: Date | null;
   deletedBy: string | null;
+  subdomain: string;
 }
 
 export interface RestaurantInsert {
@@ -1321,6 +1322,7 @@ export interface RestaurantInsert {
   updatedBy?: string | null;
   deletedAt?: Date | null;
   deletedBy?: string | null;
+  subdomain: string;
 }
 
 export const RestaurantTable: TableMeta<
@@ -1342,6 +1344,7 @@ export const RestaurantTable: TableMeta<
     updatedBy: '"updatedBy"';
     deletedAt: '"deletedAt"';
     deletedBy: '"deletedBy"';
+    subdomain: '"subdomain"';
   },
   RestaurantRow,
   RestaurantInsert
@@ -1365,6 +1368,7 @@ export const RestaurantTable: TableMeta<
     updatedBy: '"updatedBy"',
     deletedAt: '"deletedAt"',
     deletedBy: '"deletedBy"',
+    subdomain: '"subdomain"',
   },
 } as const;
 
@@ -1451,6 +1455,7 @@ export interface RestaurantStaffRow {
   updatedBy: string | null;
   deletedAt: Date | null;
   deletedBy: string | null;
+  roleId: string | null;
 }
 
 export interface RestaurantStaffInsert {
@@ -1467,6 +1472,7 @@ export interface RestaurantStaffInsert {
   updatedBy?: string | null;
   deletedAt?: Date | null;
   deletedBy?: string | null;
+  roleId?: string | null;
 }
 
 export const RestaurantStaffTable: TableMeta<
@@ -1484,6 +1490,7 @@ export const RestaurantStaffTable: TableMeta<
     updatedBy: '"updatedBy"';
     deletedAt: '"deletedAt"';
     deletedBy: '"deletedBy"';
+    roleId: '"roleId"';
   },
   RestaurantStaffRow,
   RestaurantStaffInsert
@@ -1503,6 +1510,7 @@ export const RestaurantStaffTable: TableMeta<
     updatedBy: '"updatedBy"',
     deletedAt: '"deletedAt"',
     deletedBy: '"deletedBy"',
+    roleId: '"roleId"',
   },
 } as const;
 
@@ -1556,6 +1564,128 @@ export const SessionTable: TableMeta<
     createdAt: '"createdAt"',
     updatedAt: '"updatedAt"',
     impersonatedBy: '"impersonatedBy"',
+  },
+} as const;
+
+export interface StaffRoleRow {
+  id: string;
+  restaurantId: string;
+  name: string;
+  description: string | null;
+  isSystemRole: boolean;
+  rowVersion: number;
+  createdAt: Date;
+  createdBy: string | null;
+  updatedAt: Date;
+  updatedBy: string | null;
+  deletedAt: Date | null;
+  deletedBy: string | null;
+}
+
+export interface StaffRoleInsert {
+  id?: string;
+  restaurantId: string;
+  name: string;
+  description?: string | null;
+  isSystemRole?: boolean;
+  rowVersion?: number;
+  createdAt?: Date;
+  createdBy?: string | null;
+  updatedAt?: Date;
+  updatedBy?: string | null;
+  deletedAt?: Date | null;
+  deletedBy?: string | null;
+}
+
+export const StaffRoleTable: TableMeta<
+  {
+    id: '"id"';
+    restaurantId: '"restaurantId"';
+    name: '"name"';
+    description: '"description"';
+    isSystemRole: '"isSystemRole"';
+    rowVersion: '"rowVersion"';
+    createdAt: '"createdAt"';
+    createdBy: '"createdBy"';
+    updatedAt: '"updatedAt"';
+    updatedBy: '"updatedBy"';
+    deletedAt: '"deletedAt"';
+    deletedBy: '"deletedBy"';
+  },
+  StaffRoleRow,
+  StaffRoleInsert
+> = {
+  table: '"StaffRole"',
+  cols: {
+    id: '"id"',
+    restaurantId: '"restaurantId"',
+    name: '"name"',
+    description: '"description"',
+    isSystemRole: '"isSystemRole"',
+    rowVersion: '"rowVersion"',
+    createdAt: '"createdAt"',
+    createdBy: '"createdBy"',
+    updatedAt: '"updatedAt"',
+    updatedBy: '"updatedBy"',
+    deletedAt: '"deletedAt"',
+    deletedBy: '"deletedBy"',
+  },
+} as const;
+
+export interface StaffRolePermissionRow {
+  id: string;
+  staffRoleId: string;
+  permission: string;
+  rowVersion: number;
+  createdAt: Date;
+  createdBy: string | null;
+  updatedAt: Date;
+  updatedBy: string | null;
+  deletedAt: Date | null;
+  deletedBy: string | null;
+}
+
+export interface StaffRolePermissionInsert {
+  id?: string;
+  staffRoleId: string;
+  permission: string;
+  rowVersion?: number;
+  createdAt?: Date;
+  createdBy?: string | null;
+  updatedAt?: Date;
+  updatedBy?: string | null;
+  deletedAt?: Date | null;
+  deletedBy?: string | null;
+}
+
+export const StaffRolePermissionTable: TableMeta<
+  {
+    id: '"id"';
+    staffRoleId: '"staffRoleId"';
+    permission: '"permission"';
+    rowVersion: '"rowVersion"';
+    createdAt: '"createdAt"';
+    createdBy: '"createdBy"';
+    updatedAt: '"updatedAt"';
+    updatedBy: '"updatedBy"';
+    deletedAt: '"deletedAt"';
+    deletedBy: '"deletedBy"';
+  },
+  StaffRolePermissionRow,
+  StaffRolePermissionInsert
+> = {
+  table: '"StaffRolePermission"',
+  cols: {
+    id: '"id"',
+    staffRoleId: '"staffRoleId"',
+    permission: '"permission"',
+    rowVersion: '"rowVersion"',
+    createdAt: '"createdAt"',
+    createdBy: '"createdBy"',
+    updatedAt: '"updatedAt"',
+    updatedBy: '"updatedBy"',
+    deletedAt: '"deletedAt"',
+    deletedBy: '"deletedBy"',
   },
 } as const;
 

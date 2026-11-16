@@ -2,8 +2,8 @@ import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import { Scalar } from '@scalar/hono-api-reference';
 import { apiCorsMiddleware } from '@/config/cors';
 import type { AppEnv } from '@/container';
-import { catalogRoutes } from '@/contexts/catalog/services/catalog-routes';
-import { initDiScope, requirePosStaff } from '@/contexts/identity/services/auth-middleware';
+import { adminCatalogRoutes, catalogRoutes } from '@/contexts/catalog/services/catalog-routes';
+import { initDiScope } from '@/contexts/identity/services/auth-middleware';
 import { identityRoutes } from '@/contexts/identity/services/identity-routes';
 import { ledgerRoutes } from '@/contexts/ledger/services/ledger-routes';
 import { orderRoutes } from '@/contexts/ordering/services/order-routes';
@@ -55,10 +55,8 @@ export function createApp(options: CreateAppOptions = {}): OpenAPIHono<AppEnv> {
 
   app.route('/api', identityRoutes);
   app.route('/api/restaurants', catalogRoutes);
-
-  app.use('/api/pos/orders/*', requirePosStaff());
+  app.route('/api/admin', adminCatalogRoutes);
   app.route('/api/pos/orders', orderRoutes);
-
   app.route('/api/ledger', ledgerRoutes);
 
   app.openapi(healthRoute, (c) => {
@@ -88,7 +86,7 @@ export function createApp(options: CreateAppOptions = {}): OpenAPIHono<AppEnv> {
       title: 'FoodApp UK POS & Storefront API',
       version: '1.0.0',
       description:
-        'Multi-tenant UK Restaurant POS, Storefront Catalog, Ordering, and Double-Entry Financial/Loyalty Ledger API.',
+        'Multi-tenant UK Restaurant POS, Subdomain Storefront Catalog, Dynamic Roles & Rights (PBAC), Ordering, and Double-Entry Financial/Loyalty Ledger API.',
     },
   });
 

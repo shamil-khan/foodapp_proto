@@ -1,5 +1,6 @@
 import * as crypto from 'node:crypto';
 import {
+  CategoryTable,
   type InStorePaymentMethod,
   ItemModifierTable,
   type KdsRoutingTarget,
@@ -8,11 +9,11 @@ import {
   sqlSelect,
 } from '@foodapp/db';
 import type { Pool } from 'pg';
-import type { RequestContext } from '@/container';
 import { OrderAggregate } from '@/contexts/ordering/domain/order-aggregate';
 import type { OrderLineSnapshot } from '@/contexts/ordering/domain/order-events';
 import { type KdsTicketOutput, KdsTicketVisitor } from '@/contexts/ordering/domain/order-visitor';
 import type { OrderRepository } from '@/contexts/ordering/infrastructure/order-repository';
+import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
 
@@ -47,6 +48,7 @@ export class PlacePosOrderHandler
   constructor(
     private readonly pool: Pool,
     private readonly orderRepo: OrderRepository,
+    private readonly authz: AuthorizationPolicy,
     private readonly request: RequestContext,
   ) {}
 
@@ -56,14 +58,20 @@ export class PlacePosOrderHandler
       kdsTickets: KdsTicketOutput;
     }>
   > {
+    const access = this.authz.assertRestaurantAccess(cmd.restaurantId, 'orders:place');
+    if (!access.ok) {
+      return access;
+    }
+
     const lineSnapshots: OrderLineSnapshot[] = [];
     const mCols = MenuItemTable.cols;
+    const cCols = CategoryTable.cols;
     const modCols = ItemModifierTable.cols;
 
-    // Resolve authoritative prices, UK VAT rates & KDS routing targets using typed table metadata
     for (const item of cmd.items) {
       const itemQuery = sqlSelect(MenuItemTable)
         .select([
+          mCols.categoryId,
           mCols.name,
           mCols.basePrice,
           mCols.vatRate,
@@ -86,6 +94,23 @@ export class PlacePosOrderHandler
         );
       }
 
+      const catQuery = sqlSelect(CategoryTable)
+        .select([
+          cCols.restaurantId,
+        ])
+        .whereEq(cCols.id, menuRow.categoryId)
+        .activeOnly()
+        .compile();
+      const catRes = await this.pool.query<typeof catQuery._result>(catQuery.text, catQuery.params);
+      if (catRes.rows[0]?.restaurantId !== cmd.restaurantId) {
+        return err(
+          new DomainError(
+            'TENANT_FORBIDDEN',
+            `Menu item ${item.menuItemId} does not belong to target restaurant.`,
+            403,
+          ),
+        );
+      }
       const resolvedMods: {
         name: string;
         extraPrice: number;
@@ -147,8 +172,6 @@ export class PlacePosOrderHandler
     }
 
     await this.orderRepo.save(orderResult.value);
-
-    // Use GoF Visitor to produce KDS station slips without polluting the aggregate
     const kdsTickets = orderResult.value.accept(new KdsTicketVisitor()) as KdsTicketOutput;
 
     return ok({
@@ -167,6 +190,7 @@ export interface SettlePosOrderCommand extends Command<Result<void>> {
 export class SettlePosOrderHandler implements CommandHandler<SettlePosOrderCommand, Result<void>> {
   constructor(
     private readonly orderRepo: OrderRepository,
+    private readonly authz: AuthorizationPolicy,
     private readonly request: RequestContext,
   ) {}
 
@@ -174,6 +198,11 @@ export class SettlePosOrderHandler implements CommandHandler<SettlePosOrderComma
     const order = await this.orderRepo.findById(cmd.orderId);
     if (!order) {
       return err(new DomainError('ORDER_NOT_FOUND', `Order ${cmd.orderId} not found.`, 404));
+    }
+
+    const access = this.authz.assertRestaurantAccess(order.snapshot.restaurantId, 'orders:settle');
+    if (!access.ok) {
+      return access;
     }
 
     const settleResult = order.settleBill(cmd.paymentMethod, cmd.tipAmount, {

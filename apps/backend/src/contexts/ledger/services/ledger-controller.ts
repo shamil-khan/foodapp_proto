@@ -1,7 +1,7 @@
 import type { Context } from 'hono';
 import type { AppEnv, RequestContext } from '@/container';
 import type { CommandBus, QueryBus } from '@/core/application/cqrs';
-import type { DomainError, Result } from '@/core/domain/result';
+import { DomainError, type Result } from '@/core/domain/result';
 
 interface LedgerRowDto {
   id: string;
@@ -37,58 +37,86 @@ export class LedgerController {
       take?: number;
     },
   ) {
-    const restaurantId = this.request.restaurantId ?? query.restaurantId;
+    const restaurantId = query.restaurantId ?? this.request.restaurantId;
 
     if (!restaurantId) {
       return c.json(
         {
+          code: 'MISSING_TENANT',
           error: 'restaurantId is required',
         },
         400,
       );
     }
 
-    const entries = await this.queryBus.ask<LedgerRowDto[]>('GetRestaurantLedger', {
-      restaurantId,
-      skip: query.skip ?? 0,
-      take: query.take ?? 50,
-    });
+    try {
+      const entries = await this.queryBus.ask<LedgerRowDto[]>('GetRestaurantLedger', {
+        restaurantId,
+        skip: query.skip ?? 0,
+        take: query.take ?? 50,
+      });
 
-    return c.json(
-      {
-        entries: entries.map((entry) => ({
-          ...entry,
-          createdAt:
-            entry.createdAt instanceof Date
-              ? entry.createdAt.toISOString()
-              : String(entry.createdAt),
-        })),
-      },
-      200,
-    );
+      return c.json(
+        {
+          entries: entries.map((entry) => ({
+            ...entry,
+            createdAt:
+              entry.createdAt instanceof Date
+                ? entry.createdAt.toISOString()
+                : String(entry.createdAt),
+          })),
+        },
+        200,
+      );
+    } catch (error) {
+      if (error instanceof DomainError && error.statusCode === 403) {
+        return c.json(
+          {
+            code: error.code,
+            error: error.message,
+          },
+          403,
+        );
+      }
+      throw error;
+    }
   }
 
   async getMyLoyaltyBalance(c: Context<AppEnv>) {
-    const summary = await this.queryBus.ask<{
-      totalPoints: number;
-      history: LoyaltyRowDto[];
-    }>('GetUserLoyaltyBalance', {
-      userId: this.request.actorId,
-    });
+    try {
+      const summary = await this.queryBus.ask<{
+        totalPoints: number;
+        history: LoyaltyRowDto[];
+      }>('GetUserLoyaltyBalance', {
+        userId: this.request.actorId,
+      });
 
-    return c.json(
-      {
-        totalPoints: summary.totalPoints,
-        history: summary.history.map((item) => ({
-          ...item,
-          createdAt:
-            item.createdAt instanceof Date ? item.createdAt.toISOString() : String(item.createdAt),
-        })),
-      },
-      200,
-    );
+      return c.json(
+        {
+          totalPoints: summary.totalPoints,
+          history: summary.history.map((item) => ({
+            ...item,
+            createdAt:
+              item.createdAt instanceof Date
+                ? item.createdAt.toISOString()
+                : String(item.createdAt),
+          })),
+        },
+        200,
+      );
+    } catch (error) {
+      if (error instanceof DomainError && error.statusCode === 403) {
+        return c.json(
+          {
+            code: error.code,
+            error: error.message,
+          },
+          403,
+        );
+      }
+      throw error;
+    }
   }
-
   async redeemLoyaltyPoints(
     c: Context<AppEnv>,
     body: {
@@ -112,12 +140,13 @@ export class LedgerController {
     });
 
     if (!result.ok) {
+      const status = result.error.statusCode === 403 ? 403 : 400;
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        400,
+        status,
       );
     }
 

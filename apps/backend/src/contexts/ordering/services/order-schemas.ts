@@ -22,8 +22,7 @@ export const PlacePosOrderBodySchema = z
       .enum([
         'DINE_IN',
         'TAKEAWAY',
-        'DELIVERY',
-        'QR_TABLE',
+        'ONLINE_DELIVERY',
       ])
       .default('DINE_IN'),
     items: z.array(OrderLineInputSchema).min(1),
@@ -106,7 +105,7 @@ export const SettlePosOrderBodySchema = z
     paymentMethod: z.enum([
       'CASH',
       'CARD_TERMINAL',
-      'ONLINE_STRIPE',
+      'ONLINE_GATEWAY',
     ]),
     tipAmount: z.number().min(0).default(0),
   })
@@ -125,7 +124,7 @@ export const placePosOrderRoute = createRoute({
   tags: [
     'Ordering',
   ],
-  summary: 'Place a new POS order and dispatch KDS station slips',
+  summary: 'Place a new POS order and dispatch KDS station slips (requires orders:place right)',
   security: [
     {
       bearerAuth: [],
@@ -166,6 +165,14 @@ export const placePosOrderRoute = createRoute({
         },
       },
     },
+    403: {
+      description: 'Cross-tenant access denied or missing orders:place right',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
     404: {
       description: 'Menu item unavailable or not found',
       content: {
@@ -183,7 +190,7 @@ export const listPosOrdersRoute = createRoute({
   tags: [
     'Ordering',
   ],
-  summary: 'List recent POS orders for the active restaurant',
+  summary: 'List recent POS orders for the active restaurant (requires orders:read right)',
   security: [
     {
       bearerAuth: [],
@@ -217,6 +224,14 @@ export const listPosOrdersRoute = createRoute({
         },
       },
     },
+    403: {
+      description: 'Cross-tenant access denied or missing orders:read right',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
   },
 });
 
@@ -226,7 +241,8 @@ export const settlePosOrderRoute = createRoute({
   tags: [
     'Ordering',
   ],
-  summary: 'Settle an open POS order bill and trigger financial ledger saga',
+  summary:
+    'Settle an open POS order bill and trigger financial ledger saga (requires orders:settle right)',
   security: [
     {
       bearerAuth: [],
@@ -262,6 +278,14 @@ export const settlePosOrderRoute = createRoute({
     },
     401: {
       description: 'Unauthorized POS staff session',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    403: {
+      description: 'Cross-tenant access denied or missing orders:settle right',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,

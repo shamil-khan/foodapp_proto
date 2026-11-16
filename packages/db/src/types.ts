@@ -28,6 +28,64 @@ export type OrderMilestone =
   | 'DELIVERED'
   | 'CANCELLED';
 
+export const TENANT_PERMISSIONS = [
+  'catalog:price:update',
+  'orders:read',
+  'orders:place',
+  'orders:settle',
+  'ledger:read',
+  'staff:roles:manage',
+  'staff:manage',
+] as const;
+
+export const CUSTOMER_PERMISSIONS = [
+  'storefront:orders:place',
+  'storefront:orders:read',
+  'loyalty:read',
+  'loyalty:redeem',
+] as const;
+
+export const PLATFORM_ADMIN_PERMISSIONS = [
+  'platform:restaurants:manage',
+  'platform:tenants:support',
+] as const;
+
+export const ALL_PERMISSIONS = [
+  ...TENANT_PERMISSIONS,
+  ...CUSTOMER_PERMISSIONS,
+  ...PLATFORM_ADMIN_PERMISSIONS,
+] as const;
+
+export type TenantPermission = (typeof TENANT_PERMISSIONS)[number];
+export type CustomerPermission = (typeof CUSTOMER_PERMISSIONS)[number];
+export type PlatformAdminPermission = (typeof PLATFORM_ADMIN_PERMISSIONS)[number];
+export type Permission = (typeof ALL_PERMISSIONS)[number];
+
+export const DEFAULT_ROLE_PERMISSIONS: Record<TenantRole, readonly TenantPermission[]> = {
+  OWNER: [
+    ...TENANT_PERMISSIONS,
+  ],
+  ADMIN: [
+    'catalog:price:update',
+    'orders:read',
+    'orders:place',
+    'orders:settle',
+    'ledger:read',
+    'staff:roles:manage',
+    'staff:manage',
+  ],
+  MANAGER: [
+    'catalog:price:update',
+    'orders:read',
+    'orders:place',
+    'orders:settle',
+  ],
+  ORDER_TAKER: [
+    'orders:read',
+    'orders:place',
+  ],
+};
+
 export interface AuditableEntity {
   rowVersion: number;
   createdAt: Date;
@@ -41,6 +99,7 @@ export interface AuditableEntity {
 export interface Restaurant extends AuditableEntity {
   id: string;
   name: string;
+  subdomain: string;
   vatNumber: string | null;
   companyHouseNumber: string | null;
   foodHygieneRating: number;

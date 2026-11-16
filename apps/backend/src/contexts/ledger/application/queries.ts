@@ -1,6 +1,8 @@
 import { FinancialLedgerTable, LoyaltyLedgerTable, sqlSelect } from '@foodapp/db';
 import type { Pool } from 'pg';
+import type { AuthorizationPolicy } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
+import { DomainError } from '@/core/domain/result';
 
 export interface GetRestaurantLedgerQuery extends Query<unknown[]> {
   readonly restaurantId: string;
@@ -11,9 +13,17 @@ export interface GetRestaurantLedgerQuery extends Query<unknown[]> {
 export class GetRestaurantLedgerHandler
   implements QueryHandler<GetRestaurantLedgerQuery, unknown[]>
 {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly authz: AuthorizationPolicy,
+  ) {}
 
   async execute(query: GetRestaurantLedgerQuery) {
+    const access = this.authz.assertRestaurantAccess(query.restaurantId, 'ledger:read');
+    if (!access.ok) {
+      throw new DomainError(access.error.code, access.error.message, 403);
+    }
+
     const { cols } = FinancialLedgerTable;
     const q = sqlSelect(FinancialLedgerTable)
       .select([
@@ -55,9 +65,17 @@ export class GetUserLoyaltyBalanceHandler
       }
     >
 {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly authz: AuthorizationPolicy,
+  ) {}
 
   async execute(query: GetUserLoyaltyBalanceQuery) {
+    const access = this.authz.assertUserAccess(query.userId, 'loyalty:read');
+    if (!access.ok) {
+      throw new DomainError(access.error.code, access.error.message, 403);
+    }
+
     const { cols } = LoyaltyLedgerTable;
     const q = sqlSelect(LoyaltyLedgerTable)
       .select([

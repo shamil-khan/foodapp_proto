@@ -1,15 +1,14 @@
-import {
-  type PlatformRole,
-  pgPool,
-  redisClient,
-  SYSTEM_ACTORS,
-  type TenantRole,
-} from '@foodapp/db';
+import { ALL_PERMISSIONS, pgPool, redisClient, SYSTEM_ACTORS } from '@foodapp/db';
 import type { InferdiHonoScopeEnv } from '@inferdi/hono';
 import { Container } from '@inferdi/inferdi';
+import {
+  CreateRestaurantByAdminHandler,
+  UpdateRestaurantStatusByAdminHandler,
+} from '@/contexts/catalog/application/admin-restaurant-commands';
 import { MenuCacheInvalidationHandler } from '@/contexts/catalog/application/cache-invalidation-handler';
 import { UpdateMenuItemPriceHandler } from '@/contexts/catalog/application/commands';
 import {
+  GetRestaurantBySubdomainHandler,
   GetRestaurantMenuSnapshotHandler,
   GetRestaurantsHandler,
 } from '@/contexts/catalog/application/queries';
@@ -17,6 +16,17 @@ import { CatalogRepository } from '@/contexts/catalog/infrastructure/catalog-rep
 import { CatalogController } from '@/contexts/catalog/services/catalog-controller';
 import { LoginPosStaffHandler } from '@/contexts/identity/application/pos-login-command';
 import { GetCurrentActorHandler } from '@/contexts/identity/application/queries';
+import {
+  AssignStaffRoleHandler,
+  CreateStaffRoleHandler,
+  DeleteStaffRoleHandler,
+  UpdateStaffRoleHandler,
+} from '@/contexts/identity/application/role-commands';
+import {
+  GetAssignablePermissionsHandler,
+  GetRestaurantStaffRolesHandler,
+} from '@/contexts/identity/application/role-queries';
+import { RolePermissionCache } from '@/contexts/identity/infrastructure/role-permission-cache';
 import { IdentityController } from '@/contexts/identity/services/identity-controller';
 import {
   RecordOrderSettlementHandler,
@@ -37,20 +47,14 @@ import { OrderSettlementSaga } from '@/contexts/ordering/application/order-saga'
 import { GetRestaurantOrdersHandler } from '@/contexts/ordering/application/queries';
 import { OrderRepository } from '@/contexts/ordering/infrastructure/order-repository';
 import { OrderController } from '@/contexts/ordering/services/order-controller';
+import { AuthorizationPolicy, type RequestContext } from '@/core/application/authorization';
 import { InMemoryCommandBus, InMemoryQueryBus } from '@/core/application/cqrs';
 import { InMemoryEventBus } from '@/core/application/event-bus';
 import { PgEventStore } from '@/core/infrastructure/pg-event-store';
 import { PgSagaRepository } from '@/core/infrastructure/pg-saga-repository';
 import { AppLogger } from '@/logger';
 
-export type RequestContext = {
-  requestId: string;
-  actorId: string;
-  actorSource: 'GLOBAL_USER' | 'POS_STAFF' | 'SYSTEM';
-  restaurantId?: string;
-  globalRole?: PlatformRole;
-  tenantRole?: TenantRole;
-};
+export type { RequestContext };
 
 const eventBus = new InMemoryEventBus();
 
@@ -78,12 +82,21 @@ export const rootContainer = new Container()
     ],
     'singleton',
   )
-
+  .registerClass(
+    'rolePermissionCache',
+    RolePermissionCache,
+    [
+      'db',
+      'redis',
+    ],
+    'singleton',
+  )
   .registerClass(
     'loginPosStaffHandler',
     LoginPosStaffHandler,
     [
       'db',
+      'rolePermissionCache',
     ],
     'singleton',
   )
@@ -116,8 +129,16 @@ export const rootContainer = new Container()
     'singleton',
   )
   .registerClass(
-    'getOrdersHandler',
-    GetRestaurantOrdersHandler,
+    'getRestaurantsHandler',
+    GetRestaurantsHandler,
+    [
+      'db',
+    ],
+    'singleton',
+  )
+  .registerClass(
+    'getRestaurantBySubdomainHandler',
+    GetRestaurantBySubdomainHandler,
     [
       'db',
     ],
@@ -133,22 +154,11 @@ export const rootContainer = new Container()
     'singleton',
   )
   .registerClass(
-    'getRestaurantLedgerHandler',
-    GetRestaurantLedgerHandler,
-    [
-      'db',
-    ],
+    'getAssignablePermissionsHandler',
+    GetAssignablePermissionsHandler,
+    [],
     'singleton',
   )
-  .registerClass(
-    'getUserLoyaltyHandler',
-    GetUserLoyaltyBalanceHandler,
-    [
-      'db',
-    ],
-    'singleton',
-  )
-
   .registerClass(
     'orderSaga',
     OrderSettlementSaga,
@@ -175,7 +185,14 @@ export const rootContainer = new Container()
     ],
     'singleton',
   )
-
+  .registerClass(
+    'authz',
+    AuthorizationPolicy,
+    [
+      'request',
+    ],
+    'scoped',
+  )
   .registerClass(
     'getCurrentActorHandler',
     GetCurrentActorHandler,
@@ -186,11 +203,83 @@ export const rootContainer = new Container()
     'scoped',
   )
   .registerClass(
+    'getRestaurantStaffRolesHandler',
+    GetRestaurantStaffRolesHandler,
+    [
+      'db',
+      'authz',
+    ],
+    'scoped',
+  )
+  .registerClass(
+    'createStaffRoleHandler',
+    CreateStaffRoleHandler,
+    [
+      'db',
+      'authz',
+      'request',
+    ],
+    'scoped',
+  )
+  .registerClass(
+    'updateStaffRoleHandler',
+    UpdateStaffRoleHandler,
+    [
+      'db',
+      'rolePermissionCache',
+      'authz',
+      'request',
+    ],
+    'scoped',
+  )
+  .registerClass(
+    'deleteStaffRoleHandler',
+    DeleteStaffRoleHandler,
+    [
+      'db',
+      'rolePermissionCache',
+      'authz',
+      'request',
+    ],
+    'scoped',
+  )
+  .registerClass(
+    'assignStaffRoleHandler',
+    AssignStaffRoleHandler,
+    [
+      'db',
+      'authz',
+      'request',
+    ],
+    'scoped',
+  )
+  .registerClass(
+    'createRestaurantByAdminHandler',
+    CreateRestaurantByAdminHandler,
+    [
+      'db',
+      'authz',
+      'request',
+    ],
+    'scoped',
+  )
+  .registerClass(
+    'updateRestaurantStatusByAdminHandler',
+    UpdateRestaurantStatusByAdminHandler,
+    [
+      'db',
+      'authz',
+      'request',
+    ],
+    'scoped',
+  )
+  .registerClass(
     'placeOrderHandler',
     PlacePosOrderHandler,
     [
       'db',
       'orderRepo',
+      'authz',
       'request',
     ],
     'scoped',
@@ -200,7 +289,17 @@ export const rootContainer = new Container()
     SettlePosOrderHandler,
     [
       'orderRepo',
+      'authz',
       'request',
+    ],
+    'scoped',
+  )
+  .registerClass(
+    'getOrdersHandler',
+    GetRestaurantOrdersHandler,
+    [
+      'db',
+      'authz',
     ],
     'scoped',
   )
@@ -210,7 +309,26 @@ export const rootContainer = new Container()
     [
       'catalogRepo',
       'eventBus',
+      'authz',
       'request',
+    ],
+    'scoped',
+  )
+  .registerClass(
+    'getRestaurantLedgerHandler',
+    GetRestaurantLedgerHandler,
+    [
+      'db',
+      'authz',
+    ],
+    'scoped',
+  )
+  .registerClass(
+    'getUserLoyaltyHandler',
+    GetUserLoyaltyBalanceHandler,
+    [
+      'db',
+      'authz',
     ],
     'scoped',
   )
@@ -229,27 +347,59 @@ export const rootContainer = new Container()
     [
       'db',
       'ledgerRepo',
+      'authz',
       'request',
     ],
     'scoped',
   )
-
-  // Pre-wire request-scoped CommandBus & QueryBus with their
   .registerFactory(
     'commandBus',
     (c) => {
-      const bus = new InMemoryCommandBus(c.get('log'));
+      const bus = new InMemoryCommandBus(c.get('log'), c.get('authz'));
       bus.register('LoginPosStaff', c.get('loginPosStaffHandler'));
-      bus.register('PlacePosOrder', c.get('placeOrderHandler'));
-      bus.register('SettlePosOrder', c.get('settleOrderHandler'));
-      bus.register('UpdateMenuItemPrice', c.get('updateItemPriceHandler'));
+      bus.register('CreateStaffRole', c.get('createStaffRoleHandler'), {
+        requiredPermission: 'staff:roles:manage',
+      });
+      bus.register('UpdateStaffRole', c.get('updateStaffRoleHandler'), {
+        requiredPermission: 'staff:roles:manage',
+      });
+      bus.register('DeleteStaffRole', c.get('deleteStaffRoleHandler'), {
+        requiredPermission: 'staff:roles:manage',
+      });
+      bus.register('AssignStaffRole', c.get('assignStaffRoleHandler'), {
+        requiredPermission: 'staff:manage',
+      });
+      bus.register('CreateRestaurantByAdmin', c.get('createRestaurantByAdminHandler'), {
+        requiredPermission: 'platform:restaurants:manage',
+      });
+      bus.register('UpdateRestaurantStatusByAdmin', c.get('updateRestaurantStatusByAdminHandler'), {
+        requiredPermission: 'platform:restaurants:manage',
+      });
+      bus.register('PlacePosOrder', c.get('placeOrderHandler'), {
+        requiredPermission: 'orders:place',
+      });
+      bus.register('SettlePosOrder', c.get('settleOrderHandler'), {
+        requiredPermission: 'orders:settle',
+      });
+      bus.register('UpdateMenuItemPrice', c.get('updateItemPriceHandler'), {
+        requiredPermission: 'catalog:price:update',
+      });
       bus.register('RecordOrderSettlement', c.get('recordSettlementHandler'));
-      bus.register('RedeemLoyaltyPoints', c.get('redeemLoyaltyHandler'));
+      bus.register('RedeemLoyaltyPoints', c.get('redeemLoyaltyHandler'), {
+        requiredPermission: 'loyalty:redeem',
+      });
       return bus;
     },
     [
       'log',
+      'authz',
       'loginPosStaffHandler',
+      'createStaffRoleHandler',
+      'updateStaffRoleHandler',
+      'deleteStaffRoleHandler',
+      'assignStaffRoleHandler',
+      'createRestaurantByAdminHandler',
+      'updateRestaurantStatusByAdminHandler',
       'placeOrderHandler',
       'settleOrderHandler',
       'updateItemPriceHandler',
@@ -261,33 +411,49 @@ export const rootContainer = new Container()
   .registerFactory(
     'queryBus',
     (c) => {
-      const bus = new InMemoryQueryBus();
+      const bus = new InMemoryQueryBus(c.get('authz'));
       bus.register('GetCurrentActor', c.get('getCurrentActorHandler'));
       bus.register('GetRestaurants', c.get('getRestaurantsHandler'));
-      bus.register('GetRestaurantOrders', c.get('getOrdersHandler'));
+      bus.register('GetRestaurantBySubdomain', c.get('getRestaurantBySubdomainHandler'));
       bus.register('GetRestaurantMenuSnapshot', c.get('getMenuSnapshotHandler'));
-      bus.register('GetRestaurantLedger', c.get('getRestaurantLedgerHandler'));
-      bus.register('GetUserLoyaltyBalance', c.get('getUserLoyaltyHandler'));
+      bus.register('GetAssignablePermissions', c.get('getAssignablePermissionsHandler'), {
+        requiredPermission: 'staff:roles:manage',
+      });
+      bus.register('GetRestaurantStaffRoles', c.get('getRestaurantStaffRolesHandler'), {
+        requiredPermission: 'staff:roles:manage',
+      });
+      bus.register('GetRestaurantOrders', c.get('getOrdersHandler'), {
+        requiredPermission: 'orders:read',
+      });
+      bus.register('GetRestaurantLedger', c.get('getRestaurantLedgerHandler'), {
+        requiredPermission: 'ledger:read',
+      });
+      bus.register('GetUserLoyaltyBalance', c.get('getUserLoyaltyHandler'), {
+        requiredPermission: 'loyalty:read',
+      });
       return bus;
     },
     [
+      'authz',
       'getCurrentActorHandler',
       'getRestaurantsHandler',
-      'getOrdersHandler',
+      'getRestaurantBySubdomainHandler',
       'getMenuSnapshotHandler',
+      'getAssignablePermissionsHandler',
+      'getRestaurantStaffRolesHandler',
+      'getOrdersHandler',
       'getRestaurantLedgerHandler',
       'getUserLoyaltyHandler',
     ],
     'scoped',
   )
-
-  // Constructor-injected scoped controllers
   .registerClass(
     'identityController',
     IdentityController,
     [
       'commandBus',
       'queryBus',
+      'request',
     ],
     'scoped',
   )
@@ -319,14 +485,6 @@ export const rootContainer = new Container()
       'request',
     ],
     'scoped',
-  )
-  .registerClass(
-    'getRestaurantsHandler',
-    GetRestaurantsHandler,
-    [
-      'db',
-    ],
-    'singleton',
   );
 
 const bootScope = rootContainer.createScope({
@@ -334,6 +492,7 @@ const bootScope = rootContainer.createScope({
     requestId: 'bootstrap',
     actorId: SYSTEM_ACTORS.SYSTEM_CRON,
     actorSource: 'SYSTEM',
+    permissions: ALL_PERMISSIONS,
   },
   log: new AppLogger('bootstrap'),
 });

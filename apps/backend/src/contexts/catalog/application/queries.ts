@@ -15,6 +15,7 @@ type RedisClientType = typeof redisClient;
 export interface StorefrontRestaurantDto {
   id: string;
   name: string;
+  subdomain: string;
   postcodeSector: string;
   foodHygieneRating: number | null;
   averagePrepTimeMinutes: number;
@@ -44,6 +45,7 @@ export class GetRestaurantsHandler
       .select([
         cols.id,
         cols.name,
+        cols.subdomain,
         cols.postcodeSector,
         cols.foodHygieneRating,
         cols.averagePrepTimeMinutes,
@@ -74,7 +76,6 @@ export class GetRestaurantsHandler
       return [];
     }
 
-    // Hydrate storefront branding/theme metadata in a single batch query
     const lCols = RestaurantLayoutTable.cols;
     const layoutsQuery = sqlSelect(RestaurantLayoutTable)
       .select([
@@ -107,6 +108,7 @@ export class GetRestaurantsHandler
       return {
         id: r.id,
         name: r.name,
+        subdomain: r.subdomain,
         postcodeSector: r.postcodeSector,
         foodHygieneRating: r.foodHygieneRating,
         averagePrepTimeMinutes: r.averagePrepTimeMinutes,
@@ -119,6 +121,74 @@ export class GetRestaurantsHandler
           : null,
       };
     });
+  }
+}
+export interface GetRestaurantBySubdomainQuery extends Query<StorefrontRestaurantDto | null> {
+  readonly subdomain: string;
+}
+
+export class GetRestaurantBySubdomainHandler
+  implements QueryHandler<GetRestaurantBySubdomainQuery, StorefrontRestaurantDto | null>
+{
+  constructor(private readonly pool: Pool) {}
+
+  async execute(query: GetRestaurantBySubdomainQuery): Promise<StorefrontRestaurantDto | null> {
+    const { cols } = RestaurantTable;
+    const cleanSubdomain = query.subdomain.trim().toLowerCase();
+
+    const restQuery = sqlSelect(RestaurantTable)
+      .select([
+        cols.id,
+        cols.name,
+        cols.subdomain,
+        cols.postcodeSector,
+        cols.foodHygieneRating,
+        cols.averagePrepTimeMinutes,
+      ])
+      .whereEq(cols.subdomain, cleanSubdomain)
+      .whereEq(cols.isActiveOverride, true)
+      .activeOnly()
+      .compile();
+
+    const { rows } = await this.pool.query<typeof restQuery._result>(
+      restQuery.text,
+      restQuery.params,
+    );
+    const restaurant = rows[0];
+    if (!restaurant) return null;
+
+    const lCols = RestaurantLayoutTable.cols;
+    const layoutQuery = sqlSelect(RestaurantLayoutTable)
+      .select([
+        lCols.templateId,
+        lCols.primaryColor,
+        lCols.bannerUrl,
+      ])
+      .whereEq(lCols.restaurantId, restaurant.id)
+      .activeOnly()
+      .compile();
+
+    const layoutRes = await this.pool.query<typeof layoutQuery._result>(
+      layoutQuery.text,
+      layoutQuery.params,
+    );
+    const layout = layoutRes.rows[0];
+
+    return {
+      id: restaurant.id,
+      name: restaurant.name,
+      subdomain: restaurant.subdomain,
+      postcodeSector: restaurant.postcodeSector,
+      foodHygieneRating: restaurant.foodHygieneRating,
+      averagePrepTimeMinutes: restaurant.averagePrepTimeMinutes,
+      branding: layout
+        ? {
+            templateId: layout.templateId,
+            primaryColor: layout.primaryColor,
+            bannerUrl: layout.bannerUrl,
+          }
+        : null,
+    };
   }
 }
 

@@ -19,22 +19,13 @@ import {
 export class CatalogRepository {
   constructor(private readonly pool: Pool) {}
 
-  async updateItemPrice(params: {
-    menuItemId: string;
-    newBasePrice: number;
-    expectedRowVersion: number;
-    actorId: string;
-  }): Promise<{
-    updated: boolean;
-    restaurantId?: string;
-  }> {
+  async getMenuItemRestaurantId(menuItemId: string): Promise<string | null> {
     const mCols = MenuItemTable.cols;
-
     const itemLookup = sqlSelect(MenuItemTable)
       .select([
         mCols.categoryId,
       ])
-      .whereEq(mCols.id, params.menuItemId)
+      .whereEq(mCols.id, menuItemId)
       .activeOnly()
       .compile();
 
@@ -43,11 +34,7 @@ export class CatalogRepository {
       itemLookup.params,
     );
     const itemRow = itemRes.rows[0];
-    if (!itemRow) {
-      return {
-        updated: false,
-      };
-    }
+    if (!itemRow) return null;
 
     const cCols = CategoryTable.cols;
     const catLookup = sqlSelect(CategoryTable)
@@ -62,8 +49,26 @@ export class CatalogRepository {
       catLookup.text,
       catLookup.params,
     );
-    const restaurantId = catRes.rows[0]?.restaurantId;
+    return catRes.rows[0]?.restaurantId ?? null;
+  }
 
+  async updateItemPrice(params: {
+    menuItemId: string;
+    newBasePrice: number;
+    expectedRowVersion: number;
+    actorId: string;
+  }): Promise<{
+    updated: boolean;
+    restaurantId?: string;
+  }> {
+    const restaurantId = await this.getMenuItemRestaurantId(params.menuItemId);
+    if (!restaurantId) {
+      return {
+        updated: false,
+      };
+    }
+
+    const mCols = MenuItemTable.cols;
     const updateCmd = sqlUpdate(MenuItemTable)
       .set({
         basePrice: params.newBasePrice.toFixed(2),

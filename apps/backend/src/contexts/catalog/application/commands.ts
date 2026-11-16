@@ -1,6 +1,6 @@
 import * as crypto from 'node:crypto';
-import type { RequestContext } from '@/container';
 import type { CatalogRepository } from '@/contexts/catalog/infrastructure/catalog-repository';
+import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import type { EventBus } from '@/core/application/event-bus';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
@@ -17,12 +17,23 @@ export class UpdateMenuItemPriceHandler
   constructor(
     private readonly catalogRepo: CatalogRepository,
     private readonly eventBus: EventBus,
+    private readonly authz: AuthorizationPolicy,
     private readonly request: RequestContext,
   ) {}
 
   async execute(cmd: UpdateMenuItemPriceCommand): Promise<Result<void>> {
     if (cmd.newBasePrice < 0) {
       return err(new DomainError('INVALID_PRICE', 'Menu item price cannot be negative.'));
+    }
+
+    const ownerRestaurantId = await this.catalogRepo.getMenuItemRestaurantId(cmd.menuItemId);
+    if (!ownerRestaurantId) {
+      return err(new DomainError('ITEM_NOT_FOUND', 'Menu item does not exist.', 404));
+    }
+
+    const access = this.authz.assertRestaurantAccess(ownerRestaurantId, 'catalog:price:update');
+    if (!access.ok) {
+      return access;
     }
 
     const { updated, restaurantId } = await this.catalogRepo.updateItemPrice({
@@ -42,7 +53,6 @@ export class UpdateMenuItemPriceHandler
       );
     }
 
-    // Publish stateless integration event to rebuild MenuSnapshot & refresh Redis cache
     await this.eventBus.publish([
       {
         eventId: crypto.randomUUID(),

@@ -117,7 +117,6 @@ VALUES
   )
 ON CONFLICT ("userId") DO NOTHING;
 
-
 INSERT INTO
   "User" (
     "email",
@@ -138,11 +137,12 @@ FROM
   generate_series(2, 10) AS i
 ON CONFLICT ("email") DO NOTHING;
 
--- 4. SEED 10 UK RESTAURANTS (Deterministic RFC 4122 v4 UUIDs for clean relational linking)
+-- 4. SEED 10 UK RESTAURANTS WITH UNIQUE SUBDOMAINS (*.fapp.com)
 INSERT INTO
   "Restaurant" (
     "id",
     "name",
+    "subdomain",
     "vatNumber",
     "companyHouseNumber",
     "foodHygieneRating",
@@ -157,6 +157,7 @@ VALUES
   (
     'a0000000-0000-4000-8000-000000000001',
     'Smash 360 London',
+    'smash360',
     'GB100012345',
     '08005432',
     5,
@@ -170,6 +171,7 @@ VALUES
   (
     'a0000000-0000-4000-8000-000000000002',
     'Westminster Patty Co',
+    'westminster-patty',
     'GB100024690',
     '08010864',
     5,
@@ -183,6 +185,7 @@ VALUES
   (
     'a0000000-0000-4000-8000-000000000003',
     'Manchester Smash',
+    'manchester-smash',
     'GB100037035',
     '08016296',
     5,
@@ -196,6 +199,7 @@ VALUES
   (
     'a0000000-0000-4000-8000-000000000004',
     'Brum Burger Lab',
+    'brum-burger',
     'GB100049380',
     '08021728',
     5,
@@ -209,6 +213,7 @@ VALUES
   (
     'a0000000-0000-4000-8000-000000000005',
     'Leeds Grill 360',
+    'leeds-grill',
     'GB100061725',
     '08027160',
     5,
@@ -222,6 +227,7 @@ VALUES
   (
     'a0000000-0000-4000-8000-000000000006',
     'Glasgow Melt',
+    'glasgow-melt',
     'GB100074070',
     '08032592',
     5,
@@ -235,6 +241,7 @@ VALUES
   (
     'a0000000-0000-4000-8000-000000000007',
     'Edinburgh Stack',
+    'edinburgh-stack',
     'GB100086415',
     '08038024',
     5,
@@ -248,6 +255,7 @@ VALUES
   (
     'a0000000-0000-4000-8000-000000000008',
     'Cardiff Brioche',
+    'cardiff-brioche',
     'GB100098760',
     '08043456',
     5,
@@ -261,6 +269,7 @@ VALUES
   (
     'a0000000-0000-4000-8000-000000000009',
     'Bristol Bun House',
+    'bristol-bun',
     'GB100111105',
     '08048888',
     5,
@@ -274,6 +283,7 @@ VALUES
   (
     'a0000000-0000-4000-8000-000000000010',
     'Liverpool Smash',
+    'liverpool-smash',
     'GB100123450',
     '08054320',
     5,
@@ -324,6 +334,72 @@ FROM
   "Restaurant"
 ON CONFLICT ("restaurantId") DO NOTHING;
 
+-- 5B. SEED DEFAULT STAFF ROLES & RIGHTS FOR ALL 10 RESTAURANTS
+INSERT INTO
+  "StaffRole" (
+    "restaurantId",
+    "name",
+    "description",
+    "isSystemRole",
+    "createdBy",
+    "updatedBy"
+  )
+SELECT
+  r."id",
+  role_def.role_name,
+  role_def.role_desc,
+  role_def.is_sys,
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
+FROM
+  "Restaurant" r
+  CROSS JOIN (
+    VALUES
+      ('OWNER', 'Full restaurant ownership, ledger, staff & role administration', TRUE),
+      ('ADMIN', 'Restaurant administrator with full operational and role rights', FALSE),
+      ('MANAGER', 'Floor manager with catalog pricing, ordering, and settlement rights', FALSE),
+      ('ORDER_TAKER', 'Front-of-house POS cashier with order placement and viewing rights', FALSE)
+  ) AS role_def (role_name, role_desc, is_sys)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO
+  "StaffRolePermission" (
+    "staffRoleId",
+    "permission",
+    "createdBy",
+    "updatedBy"
+  )
+SELECT
+  sr."id",
+  perm_def.permission,
+  pg_temp.seed_actor()::UUID,
+  pg_temp.seed_actor()::UUID
+FROM
+  "StaffRole" sr
+  JOIN (
+    VALUES
+      ('OWNER', 'catalog:price:update'),
+      ('OWNER', 'orders:read'),
+      ('OWNER', 'orders:place'),
+      ('OWNER', 'orders:settle'),
+      ('OWNER', 'ledger:read'),
+      ('OWNER', 'staff:roles:manage'),
+      ('OWNER', 'staff:manage'),
+      ('ADMIN', 'catalog:price:update'),
+      ('ADMIN', 'orders:read'),
+      ('ADMIN', 'orders:place'),
+      ('ADMIN', 'orders:settle'),
+      ('ADMIN', 'ledger:read'),
+      ('ADMIN', 'staff:roles:manage'),
+      ('ADMIN', 'staff:manage'),
+      ('MANAGER', 'catalog:price:update'),
+      ('MANAGER', 'orders:read'),
+      ('MANAGER', 'orders:place'),
+      ('MANAGER', 'orders:settle'),
+      ('ORDER_TAKER', 'orders:read'),
+      ('ORDER_TAKER', 'orders:place')
+  ) AS perm_def (role_name, permission) ON sr."name" = perm_def.role_name
+ON CONFLICT DO NOTHING;
 
 -- 6. SEED 5 PHYSICAL DINING TABLES PER RESTAURANT (50 TOTAL)
 INSERT INTO
@@ -352,8 +428,7 @@ FROM
   CROSS JOIN generate_series(1, 5) AS t_idx
 ON CONFLICT ("activeQrSessionToken") DO NOTHING;
 
-
--- 7. SEED 10 ISOLATED STAFF MEMBERS PER RESTAURANT (100 TOTAL)
+-- 7. SEED 10 ISOLATED STAFF MEMBERS PER RESTAURANT LINKED TO ROLE ID (100 TOTAL)
 INSERT INTO
   "RestaurantStaff" (
     "restaurantId",
@@ -361,6 +436,7 @@ INSERT INTO
     "passwordHash",
     "name",
     "role",
+    "roleId",
     "createdBy",
     "updatedBy"
   )
@@ -370,6 +446,7 @@ SELECT
   '$2b$10$MockHashedPasswordStringForTenantStaff',
   'Staff ' || s.idx || ' (' || r."name" || ')',
   s.role_name::"TenantRole",
+  sr."id",
   pg_temp.seed_actor()::UUID,
   pg_temp.seed_actor()::UUID
 FROM
@@ -387,6 +464,8 @@ FROM
       (9, 'ORDER_TAKER'),
       (10, 'ORDER_TAKER')
   ) AS s (idx, role_name)
+  JOIN "StaffRole" sr ON sr."restaurantId" = r."id"
+  AND sr."name" = s.role_name
 ON CONFLICT ("email") DO NOTHING;
 
 -- 8. SEED CATEGORIES, SMASH BURGER MENU ITEMS & MODIFIERS

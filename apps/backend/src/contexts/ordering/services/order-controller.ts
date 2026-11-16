@@ -4,7 +4,7 @@ import type { AppEnv, RequestContext } from '@/container';
 import type { PosOrderSummaryDto } from '@/contexts/ordering/application/queries';
 import type { KdsTicketOutput } from '@/contexts/ordering/domain/order-visitor';
 import type { CommandBus, QueryBus } from '@/core/application/cqrs';
-import type { DomainError, Result } from '@/core/domain/result';
+import { DomainError, type Result } from '@/core/domain/result';
 
 export class OrderController {
   constructor(
@@ -19,33 +19,47 @@ export class OrderController {
       restaurantId?: string;
     },
   ) {
-    const restaurantId = this.request.restaurantId ?? query.restaurantId;
+    const restaurantId = query.restaurantId ?? this.request.restaurantId;
 
     if (!restaurantId) {
       return c.json(
         {
+          code: 'MISSING_TENANT',
           error: 'restaurantId is required',
         },
         400,
       );
     }
 
-    const orders = await this.queryBus.ask<PosOrderSummaryDto[]>('GetRestaurantOrders', {
-      restaurantId,
-    });
+    try {
+      const orders = await this.queryBus.ask<PosOrderSummaryDto[]>('GetRestaurantOrders', {
+        restaurantId,
+      });
 
-    return c.json(
-      {
-        orders: orders.map((order) => ({
-          ...order,
-          createdAt:
-            order.createdAt instanceof Date
-              ? order.createdAt.toISOString()
-              : String(order.createdAt),
-        })),
-      },
-      200,
-    );
+      return c.json(
+        {
+          orders: orders.map((order) => ({
+            ...order,
+            createdAt:
+              order.createdAt instanceof Date
+                ? order.createdAt.toISOString()
+                : String(order.createdAt),
+          })),
+        },
+        200,
+      );
+    } catch (error) {
+      if (error instanceof DomainError && error.statusCode === 403) {
+        return c.json(
+          {
+            code: error.code,
+            error: error.message,
+          },
+          403,
+        );
+      }
+      throw error;
+    }
   }
 
   async placeOrder(
@@ -63,10 +77,11 @@ export class OrderController {
       }[];
     },
   ) {
-    const restaurantId = this.request.restaurantId ?? body.restaurantId;
+    const restaurantId = body.restaurantId ?? this.request.restaurantId;
     if (!restaurantId) {
       return c.json(
         {
+          code: 'MISSING_TENANT',
           error: 'restaurantId is required',
         },
         400,
@@ -90,7 +105,8 @@ export class OrderController {
     });
 
     if (!result.ok) {
-      const status = result.error.statusCode === 404 ? 404 : 400;
+      const status =
+        result.error.statusCode === 403 ? 403 : result.error.statusCode === 404 ? 404 : 400;
       return c.json(
         {
           code: result.error.code,
@@ -120,7 +136,8 @@ export class OrderController {
     });
 
     if (!result.ok) {
-      const status = result.error.statusCode === 404 ? 404 : 400;
+      const status =
+        result.error.statusCode === 403 ? 403 : result.error.statusCode === 404 ? 404 : 400;
       return c.json(
         {
           code: result.error.code,

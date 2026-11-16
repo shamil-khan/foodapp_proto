@@ -1,3 +1,6 @@
+import type { Permission } from '@foodapp/db';
+import type { AuthorizationPolicy } from '@/core/application/authorization';
+import { DomainError, err, type Result } from '@/core/domain/result';
 import type { AppLogger } from '@/logger';
 
 export interface Command<TResult = void> {
@@ -16,9 +19,11 @@ export interface QueryHandler<TQuery extends Query<TResult>, TResult> {
   execute(query: TQuery): Promise<TResult>;
 }
 
-/**
- * GoF Decorator: Attaches structured AppLogger execution timing to any CommandHandler
- */
+export interface ExecutionAuthOptions {
+  readonly requiredPermission?: Permission;
+}
+
+// GoF Pattern: Decorator — Cross-cutting timing/audit logger around command execution
 export class LoggingCommandHandlerDecorator<TCommand extends Command<TResult>, TResult = void>
   implements CommandHandler<TCommand, TResult>
 {
@@ -44,35 +49,86 @@ export class LoggingCommandHandlerDecorator<TCommand extends Command<TResult>, T
   }
 }
 
+// GoF Pattern: Decorator — Enforces required right before command execution
+export class AuthorizingCommandHandlerDecorator<TCommand extends Command<TResult>, TResult = void>
+  implements CommandHandler<TCommand, TResult>
+{
+  constructor(
+    private readonly inner: CommandHandler<TCommand, TResult>,
+    private readonly authz: AuthorizationPolicy,
+    private readonly requiredPermission: Permission,
+  ) {}
+
+  async execute(command: TCommand): Promise<TResult> {
+    const check = this.authz.assertPermission(this.requiredPermission);
+    if (!check.ok) {
+      return err(check.error) as unknown as TResult;
+    }
+    return this.inner.execute(command);
+  }
+}
+
+// GoF Pattern: Decorator — Enforces required right before query execution
+export class AuthorizingQueryHandlerDecorator<TQuery extends Query<TResult>, TResult>
+  implements QueryHandler<TQuery, TResult>
+{
+  constructor(
+    private readonly inner: QueryHandler<TQuery, TResult>,
+    private readonly authz: AuthorizationPolicy,
+    private readonly requiredPermission: Permission,
+  ) {}
+
+  async execute(query: TQuery): Promise<TResult> {
+    const check = this.authz.assertPermission(this.requiredPermission);
+    if (!check.ok) {
+      throw new DomainError(check.error.code, check.error.message, 403);
+    }
+    return this.inner.execute(query);
+  }
+}
 export interface CommandBus {
   register<TCommand extends Command<TResult>, TResult>(
     commandName: string,
     handler: CommandHandler<TCommand, TResult>,
+    options?: ExecutionAuthOptions,
   ): void;
-  dispatch<TResult>(commandName: string, command: Command<TResult>): Promise<TResult>;
+  dispatch<TResult extends Result<unknown, DomainError> | unknown>(
+    commandName: string,
+    command: Command<TResult>,
+  ): Promise<TResult>;
 }
 
 export interface QueryBus {
   register<TQuery extends Query<TResult>, TResult>(
     queryName: string,
     handler: QueryHandler<TQuery, TResult>,
+    options?: ExecutionAuthOptions,
   ): void;
   ask<TResult>(queryName: string, query: Query<TResult>): Promise<TResult>;
 }
 
-/**
- * GoF Mediator: Routes commands to handlers wrapped with LoggingCommandHandlerDecorator
- */
 export class InMemoryCommandBus implements CommandBus {
   private readonly handlers = new Map<string, CommandHandler<Command<unknown>, unknown>>();
 
-  constructor(private readonly log: AppLogger) {}
+  constructor(
+    private readonly log: AppLogger,
+    private readonly authz?: AuthorizationPolicy,
+  ) {}
 
   register<TCommand extends Command<TResult>, TResult>(
     commandName: string,
     handler: CommandHandler<TCommand, TResult>,
+    options?: ExecutionAuthOptions,
   ): void {
-    const decorated = new LoggingCommandHandlerDecorator(handler, commandName, this.log);
+    let wrapped: CommandHandler<TCommand, TResult> = handler;
+    if (options?.requiredPermission && this.authz) {
+      wrapped = new AuthorizingCommandHandlerDecorator(
+        wrapped,
+        this.authz,
+        options.requiredPermission,
+      );
+    }
+    const decorated = new LoggingCommandHandlerDecorator(wrapped, commandName, this.log);
     this.handlers.set(commandName, decorated as CommandHandler<Command<unknown>, unknown>);
   }
 
@@ -85,17 +141,25 @@ export class InMemoryCommandBus implements CommandBus {
   }
 }
 
-/**
- * GoF Mediator: Routes read queries to QueryHandlers
- */
 export class InMemoryQueryBus implements QueryBus {
   private readonly handlers = new Map<string, QueryHandler<Query<unknown>, unknown>>();
+
+  constructor(private readonly authz?: AuthorizationPolicy) {}
 
   register<TQuery extends Query<TResult>, TResult>(
     queryName: string,
     handler: QueryHandler<TQuery, TResult>,
+    options?: ExecutionAuthOptions,
   ): void {
-    this.handlers.set(queryName, handler as QueryHandler<Query<unknown>, unknown>);
+    let wrapped: QueryHandler<TQuery, TResult> = handler;
+    if (options?.requiredPermission && this.authz) {
+      wrapped = new AuthorizingQueryHandlerDecorator(
+        wrapped,
+        this.authz,
+        options.requiredPermission,
+      );
+    }
+    this.handlers.set(queryName, wrapped as QueryHandler<Query<unknown>, unknown>);
   }
 
   async ask<TResult>(queryName: string, query: Query<TResult>): Promise<TResult> {

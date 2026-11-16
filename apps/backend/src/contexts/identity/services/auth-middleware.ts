@@ -1,10 +1,11 @@
 import * as crypto from 'node:crypto';
-import { type PlatformRole, SYSTEM_ACTORS, type TenantRole } from '@foodapp/db';
+import { type Permission, type PlatformRole, SYSTEM_ACTORS, type TenantRole } from '@foodapp/db';
 import { inferdiHono } from '@inferdi/hono';
 import { createMiddleware } from 'hono/factory';
 import { type AppEnv, type RequestContext, rootContainer } from '@/container';
 import { auth } from '@/contexts/identity/infrastructure/better-auth';
 import { PosTokenService } from '@/contexts/identity/infrastructure/pos-token-service';
+import { resolveDefaultPermissionsForActor } from '@/core/application/authorization';
 import { AppLogger } from '@/logger';
 
 const posTokenService = new PosTokenService();
@@ -19,16 +20,27 @@ export const initDiScope = inferdiHono({
       requestId,
       actorId: SYSTEM_ACTORS.SYSTEM_CRON,
       actorSource: 'SYSTEM',
+      permissions: [],
     };
 
     const posClaims = await posTokenService.verifyRequestToken(c);
     if (posClaims) {
+      const roleCache = root.get('rolePermissionCache');
+      const livePermissions = posClaims.roleId
+        ? await roleCache.getPermissionsForRole(posClaims.roleId)
+        : posClaims.permissions;
+
       context = {
         requestId,
         actorId: posClaims.staffId,
         actorSource: 'POS_STAFF',
         restaurantId: posClaims.restaurantId,
+        roleId: posClaims.roleId,
         tenantRole: posClaims.role,
+        permissions: resolveDefaultPermissionsForActor({
+          actorSource: 'POS_STAFF',
+          resolvedTenantPermissions: livePermissions,
+        }),
       };
     } else {
       const session = await auth.api.getSession({
@@ -36,11 +48,16 @@ export const initDiScope = inferdiHono({
       });
 
       if (session?.user) {
+        const globalRole = (session.user.role as PlatformRole) ?? 'CUSTOMER';
         context = {
           requestId,
           actorId: session.user.id,
           actorSource: 'GLOBAL_USER',
-          globalRole: (session.user.role as PlatformRole) ?? 'CUSTOMER',
+          globalRole,
+          permissions: resolveDefaultPermissionsForActor({
+            actorSource: 'GLOBAL_USER',
+            globalRole,
+          }),
         };
       }
     }
@@ -51,7 +68,6 @@ export const initDiScope = inferdiHono({
     });
   },
 });
-
 export const requireGlobalUser = (allowedRoles?: readonly PlatformRole[]) =>
   createMiddleware<AppEnv>(async (c, next) => {
     const request = c.var.di.get('request');
@@ -59,6 +75,7 @@ export const requireGlobalUser = (allowedRoles?: readonly PlatformRole[]) =>
     if (request.actorSource !== 'GLOBAL_USER' || !request.globalRole) {
       return c.json(
         {
+          code: 'UNAUTHORIZED',
           error: 'Unauthorized: Global user session required',
         },
         401,
@@ -68,6 +85,7 @@ export const requireGlobalUser = (allowedRoles?: readonly PlatformRole[]) =>
     if (allowedRoles && !allowedRoles.includes(request.globalRole)) {
       return c.json(
         {
+          code: 'FORBIDDEN',
           error: 'Forbidden: Insufficient platform permissions',
         },
         403,
@@ -85,6 +103,7 @@ export const requirePosStaff = (allowedTenantRoles?: readonly TenantRole[]) =>
       if (allowedTenantRoles && !allowedTenantRoles.includes(request.tenantRole)) {
         return c.json(
           {
+            code: 'FORBIDDEN',
             error: 'Forbidden: Insufficient restaurant staff role',
           },
           403,
@@ -101,8 +120,38 @@ export const requirePosStaff = (allowedTenantRoles?: readonly TenantRole[]) =>
 
     return c.json(
       {
+        code: 'UNAUTHORIZED',
         error: 'Unauthorized: POS staff shift login required',
       },
       401,
     );
+  });
+
+export const requirePermission = (permission: Permission) =>
+  createMiddleware<AppEnv>(async (c, next) => {
+    const request = c.var.di.get('request');
+    const authz = c.var.di.get('authz');
+
+    if (request.actorSource === 'SYSTEM') {
+      return c.json(
+        {
+          code: 'UNAUTHORIZED',
+          error: 'Authentication required',
+        },
+        401,
+      );
+    }
+
+    const check = authz.assertPermission(permission);
+    if (!check.ok) {
+      return c.json(
+        {
+          code: check.error.code,
+          error: check.error.message,
+        },
+        403,
+      );
+    }
+
+    await next();
   });

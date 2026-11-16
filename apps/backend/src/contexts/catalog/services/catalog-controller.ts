@@ -35,6 +35,37 @@ export class CatalogController {
     );
   }
 
+  async getRestaurantBySubdomain(
+    c: Context<AppEnv>,
+    params: {
+      subdomain: string;
+    },
+  ) {
+    const restaurant = await this.queryBus.ask<StorefrontRestaurantDto | null>(
+      'GetRestaurantBySubdomain',
+      {
+        subdomain: params.subdomain,
+      },
+    );
+
+    if (!restaurant) {
+      return c.json(
+        {
+          code: 'NOT_FOUND',
+          error: 'Restaurant not found or suspended',
+        },
+        404,
+      );
+    }
+
+    return c.json(
+      {
+        restaurant,
+      },
+      200,
+    );
+  }
+
   async getMenuSnapshot(
     c: Context<AppEnv>,
     params: {
@@ -80,7 +111,14 @@ export class CatalogController {
     );
 
     if (!result.ok) {
-      const status = result.error.statusCode === 409 ? 409 : 400;
+      const status =
+        result.error.statusCode === 403
+          ? 403
+          : result.error.statusCode === 404
+            ? 404
+            : result.error.statusCode === 409
+              ? 409
+              : 400;
       return c.json(
         {
           code: result.error.code,
@@ -94,6 +132,80 @@ export class CatalogController {
       {
         success: true as const,
         menuItemId: params.itemId,
+      },
+      200,
+    );
+  }
+  async createRestaurantByAdmin(
+    c: Context<AppEnv>,
+    body: {
+      name: string;
+      subdomain: string;
+      postcodeSector: string;
+      ownerName: string;
+      ownerEmail: string;
+      ownerPassword: string;
+      platformFeeRate?: number;
+    },
+  ) {
+    const result = await this.commandBus.dispatch<
+      Result<
+        {
+          restaurantId: string;
+          subdomain: string;
+          ownerStaffId: string;
+        },
+        DomainError
+      >
+    >('CreateRestaurantByAdmin', body);
+
+    if (!result.ok) {
+      const status =
+        result.error.statusCode === 403 ? 403 : result.error.statusCode === 409 ? 409 : 400;
+      return c.json(
+        {
+          code: result.error.code,
+          error: result.error.message,
+        },
+        status,
+      );
+    }
+
+    return c.json(result.value, 201);
+  }
+
+  async updateRestaurantStatusByAdmin(
+    c: Context<AppEnv>,
+    params: {
+      restaurantId: string;
+    },
+    body: {
+      isActive: boolean;
+    },
+  ) {
+    const result = await this.commandBus.dispatch<Result<void, DomainError>>(
+      'UpdateRestaurantStatusByAdmin',
+      {
+        restaurantId: params.restaurantId,
+        isActive: body.isActive,
+      },
+    );
+
+    if (!result.ok) {
+      const status =
+        result.error.statusCode === 403 ? 403 : result.error.statusCode === 404 ? 404 : 400;
+      return c.json(
+        {
+          code: result.error.code,
+          error: result.error.message,
+        },
+        status,
+      );
+    }
+
+    return c.json(
+      {
+        success: true as const,
       },
       200,
     );
