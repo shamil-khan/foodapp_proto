@@ -1,14 +1,14 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import { Scalar } from '@scalar/hono-api-reference';
+import { adminCatalogRoutes, catalogRoutes } from '@/catalog/services/catalog-routes';
 import { apiCorsMiddleware } from '@/config/cors';
 import type { AppEnv } from '@/container';
-import { adminCatalogRoutes, catalogRoutes } from '@/contexts/catalog/services/catalog-routes';
-import { initDiScope } from '@/contexts/identity/services/auth-middleware';
-import { identityRoutes } from '@/contexts/identity/services/identity-routes';
-import { ledgerRoutes } from '@/contexts/ledger/services/ledger-routes';
-import { orderRoutes } from '@/contexts/ordering/services/order-routes';
 import { openApiValidationHook } from '@/core/services/openapi-shared';
 import { globalErrorHandler } from '@/errorHandler';
+import { initDiScope } from '@/identity/services/auth-middleware';
+import { identityRoutes } from '@/identity/services/identity-routes';
+import { ledgerRoutes } from '@/ledger/services/ledger-routes';
+import { orderRoutes } from '@/ordering/services/order-routes';
 
 const HealthResponseSchema = z
   .object({

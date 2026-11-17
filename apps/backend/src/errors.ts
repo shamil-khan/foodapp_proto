@@ -1,4 +1,3 @@
-// src/errors.ts
 import type { StatusCode } from 'hono/utils/http-status';
 
 export class AppError extends Error {
@@ -12,7 +11,6 @@ export class AppError extends Error {
   }
 }
 
-// Concrete subclass examples
 export class NotFoundError extends AppError {
   constructor(message = 'Resource not found') {
     super(404, 'RESOURCE_NOT_FOUND', message);

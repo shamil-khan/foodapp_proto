@@ -1,54 +1,19 @@
-// apps/backend/src/container.ts
-
 import { ALL_PERMISSIONS, pgPool, redisClient, SYSTEM_ACTORS } from '@foodapp/db';
 import type { InferdiHonoScopeEnv } from '@inferdi/hono';
 import { Container } from '@inferdi/inferdi';
 import {
   CreateRestaurantByAdminHandler,
   UpdateRestaurantStatusByAdminHandler,
-} from '@/contexts/catalog/application/admin-restaurant-commands';
-import { MenuCacheInvalidationHandler } from '@/contexts/catalog/application/cache-invalidation-handler';
-import { UpdateMenuItemPriceHandler } from '@/contexts/catalog/application/commands';
+} from '@/catalog/application/admin-restaurant-commands';
+import { MenuCacheInvalidationHandler } from '@/catalog/application/cache-invalidation-handler';
+import { UpdateMenuItemPriceHandler } from '@/catalog/application/commands';
 import {
   GetRestaurantBySubdomainHandler,
   GetRestaurantMenuSnapshotHandler,
   GetRestaurantsHandler,
-} from '@/contexts/catalog/application/queries';
-import { CatalogRepository } from '@/contexts/catalog/infrastructure/catalog-repository';
-import { CatalogController } from '@/contexts/catalog/services/catalog-controller';
-import { LoginPosStaffHandler } from '@/contexts/identity/application/pos-login-command';
-import { GetCurrentActorHandler } from '@/contexts/identity/application/queries';
-import {
-  AssignStaffRoleHandler,
-  CreateStaffRoleHandler,
-  DeleteStaffRoleHandler,
-  UpdateStaffRoleHandler,
-} from '@/contexts/identity/application/role-commands';
-import {
-  GetAssignablePermissionsHandler,
-  GetRestaurantStaffRolesHandler,
-} from '@/contexts/identity/application/role-queries';
-import { RolePermissionCache } from '@/contexts/identity/infrastructure/role-permission-cache';
-import { IdentityController } from '@/contexts/identity/services/identity-controller';
-import {
-  RecordOrderSettlementHandler,
-  RedeemLoyaltyPointsHandler,
-} from '@/contexts/ledger/application/commands';
-import { LoyaltyPointsEventHandler } from '@/contexts/ledger/application/loyalty-event-handler';
-import {
-  GetRestaurantLedgerHandler,
-  GetUserLoyaltyBalanceHandler,
-} from '@/contexts/ledger/application/queries';
-import { LedgerRepository } from '@/contexts/ledger/infrastructure/ledger-repository';
-import { LedgerController } from '@/contexts/ledger/services/ledger-controller';
-import {
-  PlacePosOrderHandler,
-  SettlePosOrderHandler,
-} from '@/contexts/ordering/application/commands';
-import { OrderSettlementSaga } from '@/contexts/ordering/application/order-saga';
-import { GetRestaurantOrdersHandler } from '@/contexts/ordering/application/queries';
-import { OrderRepository } from '@/contexts/ordering/infrastructure/order-repository';
-import { OrderController } from '@/contexts/ordering/services/order-controller';
+} from '@/catalog/application/queries';
+import { CatalogRepository } from '@/catalog/infrastructure/catalog-repository';
+import { CatalogController } from '@/catalog/services/catalog-controller';
 import { AuthorizationPolicy, type RequestContext } from '@/core/application/authorization';
 import {
   type CommandBus,
@@ -59,7 +24,37 @@ import {
 import { InMemoryEventBus } from '@/core/application/event-bus';
 import { PgEventStore } from '@/core/infrastructure/pg-event-store';
 import { PgSagaRepository } from '@/core/infrastructure/pg-saga-repository';
+import { LoginPosStaffHandler } from '@/identity/application/pos-login-command';
+import { GetCurrentActorHandler } from '@/identity/application/queries';
+import {
+  AssignStaffRoleHandler,
+  CreateStaffRoleHandler,
+  DeleteStaffRoleHandler,
+  UpdateStaffRoleHandler,
+} from '@/identity/application/role-commands';
+import {
+  GetAssignablePermissionsHandler,
+  GetRestaurantStaffRolesHandler,
+} from '@/identity/application/role-queries';
+import { RolePermissionCache } from '@/identity/infrastructure/role-permission-cache';
+import { IdentityController } from '@/identity/services/identity-controller';
+import {
+  RecordOrderSettlementHandler,
+  RedeemLoyaltyPointsHandler,
+} from '@/ledger/application/commands';
+import { LoyaltyPointsEventHandler } from '@/ledger/application/loyalty-event-handler';
+import {
+  GetRestaurantLedgerHandler,
+  GetUserLoyaltyBalanceHandler,
+} from '@/ledger/application/queries';
+import { LedgerRepository } from '@/ledger/infrastructure/ledger-repository';
+import { LedgerController } from '@/ledger/services/ledger-controller';
 import { AppLogger } from '@/logger';
+import { PlacePosOrderHandler, SettlePosOrderHandler } from '@/ordering/application/commands';
+import { OrderSettlementSaga } from '@/ordering/application/order-saga';
+import { GetRestaurantOrdersHandler } from '@/ordering/application/queries';
+import { OrderRepository } from '@/ordering/infrastructure/order-repository';
+import { OrderController } from '@/ordering/services/order-controller';
 
 export type { RequestContext };
 
