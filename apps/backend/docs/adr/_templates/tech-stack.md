@@ -1,8 +1,6 @@
-// apps/backend/docs/adr/_templates/tech-stack.md (Part 1 of 2)
-
 # Backend Tech Stack & System Architecture Baseline (`@foodapp/backend`)
 
-> **Living Document Rule:** Update this file at **Step 7 (Post-Task Living Doc Sync)** whenever packages, environment variables, bounded contexts, DI registrations, or cross-cutting policies change.
+> **Living Document Rule:** Update this file at **Step 8 (Post-Task Living Doc Sync)** whenever packages, environment variables, bounded contexts, DI registrations, or cross-cutting policies change.
 > **API Endpoint Reference:** Raw HTTP routes, request schemas, and response payloads are auto-documented via OpenAPI 3.1 at `/api/doc` and Scalar UI at `/api/reference`—do not duplicate raw route tables here.
 
 ---
@@ -43,10 +41,11 @@
 - `BETTER_AUTH_SECRET` — Better Auth session & HS256 POS shift JWT signing secret
 - `FRONTEND_ORIGINS` — Comma-separated allowed cross-cloud origins (`src/config/cors.ts`)
 - `PORT` — HTTP server port (defaults to `3000`)
-  // apps/backend/docs/adr/_templates/tech-stack.md (Part 2 of 2)
 
-## 4. Dependency Injection Lifetimes (`src/container.ts`)
+## 4. Dependency Injection Lifetimes & Modular Composition (`src/container.ts`)
 
+- **Centralized Token Registry:** `DI_TOKENS` (`as const` object literal grouped by `CORE`, `IDENTITY`, `CATALOG`, `ORDERING`, `LEDGER`) prevents duplicate keys and complies with `"erasableSyntaxOnly": true`.
+- **Context Composition Functions:** `createCoreModule` -> `registerIdentityModule` -> `registerCatalogModule` -> `registerOrderingModule` -> `registerLedgerModule`, paired with co-located `register<Context>Commands` / `register<Context>Queries` helpers and `registerDomainEventSubscribers`.
 - **Scope Inputs:** `request` (`RequestContext`), `log` (`AppLogger`)
 - **`'singleton'`:**
   - Core: `db` (`pgPool`), `redis` (`redisClient`), `eventBus` (`InMemoryEventBus`), `eventStore` (`PgEventStore`), `sagaRepo` (`PgSagaRepository`)

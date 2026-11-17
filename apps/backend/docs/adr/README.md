@@ -1,5 +1,3 @@
-// apps/backend/docs/adr/README.md
-
 # FoodApp (`fapp`) — Architecture Decision Records & Engineering Index
 
 > **Platform Vision:** Multi-tenant Restaurant POS & Storefront platform built with Domain-Driven Design (DDD), CQRS, Event Sourcing, and microservice-ready bounded contexts—architected for **multi-region expansion** (UK, US, Australia, and additional markets via pluggable territorial tax/VAT and compliance strategies).
@@ -36,14 +34,18 @@ _(See [`./_templates/tech-stack.md`](./_templates/tech-stack.md) for exact DI li
 
 ## 3. ADR Log (Chronological)
 
-| ADR                                                                                    | Title                                                                | Status                     | Notes                                                   |
-| :------------------------------------------------------------------------------------- | :------------------------------------------------------------------- | :------------------------- | :------------------------------------------------------ |
-| [`001-ARCHITECTURE.md`](./001-ARCHITECTURE.md)                                         | Core DDD, Event Sourcing, CQRS & Double-Entry Ledger Baseline        | **Implemented**            | Historical architectural foundation                     |
-| [`002-openapi-validation-cors.md`](./002-openapi-validation-cors.md)                   | OpenAPI 3.1, Zod v4 Validation, CORS & Static Exporter               | **Implemented**            | Runtime contracts & `/api/reference`                    |
-| [`003-multi-tenant-authorization.md`](./003-multi-tenant-authorization.md)             | Initial Multi-Tenant Authorization Draft                             | **Superseded**             | Superseded by `003-multi-tenant-rbac-rights-summary.md` |
-| [`003-multi-tenant-rbac-rights-summary.md`](./003-multi-tenant-rbac-rights-summary.md) | Subdomain Multi-Tenancy (`*.fapp.com`) & Dynamic Roles/Rights (PBAC) | **Implemented & Verified** | Live subdomain routing + Redis PBAC                     |
-4. **Multi-Region & Territorial Expansion (Planned):**
-   - Initially launched with UK VAT rules (`StandardUkVatStrategy` / `ZeroRatedUkVatStrategy`), with a future ADR planned to introduce region-specific tax/VAT and territorial compliance workflows for US, Australia, and additional markets.
+| ADR                                                                                    | Title                                                                | Status                     | Notes                                                                                                      |
+| :------------------------------------------------------------------------------------- | :------------------------------------------------------------------- | :------------------------- | :--------------------------------------------------------------------------------------------------------- |
+| [`001-ARCHITECTURE.md`](./001-ARCHITECTURE.md)                                         | Core DDD, Event Sourcing, CQRS & Double-Entry Ledger Baseline        | **Implemented**            | Historical architectural foundation                                                                        |
+| [`002-openapi-validation-cors.md`](./002-openapi-validation-cors.md)                   | OpenAPI 3.1, Zod v4 Validation, CORS & Static Exporter               | **Implemented**            | Runtime contracts & `/api/reference`                                                                       |
+| [`003-multi-tenant-rbac-rights-summary.md`](./003-multi-tenant-rbac-rights-summary.md) | Subdomain Multi-Tenancy (`*.fapp.com`) & Dynamic Roles/Rights (PBAC) | **Implemented & Verified** | Live subdomain routing + Redis PBAC (replaces `003-multi-tenant-authorization.md`)                         |
+| [`004-modular-di-containers-summary.md`](./004-modular-di-containers-summary.md)       | Modular Per-Context DI Composition in `src/container.ts`             | **Implemented & Verified** | Centralized `DI_TOKENS` + per-context container & bus registrars (replaces `004-modular-di-containers.md`) |
+| [`005-decouple-order-settlement-saga.md`](./005-decouple-order-settlement-saga.md)     | Decouple OrderSettlementSaga from Ledger Infrastructure              | **Proposed**               | Out-of-scope flaw captured during ADR-004                                                                  |
+| [`006-ordering-route-auth-middleware.md`](./006-ordering-route-auth-middleware.md)     | Enforce HTTP Route-Level Permission Guards in `order-routes.ts`      | **Proposed**               | Out-of-scope flaw captured after ADR-004 verification                                                      |
+
+**- Multi-Region & Territorial Expansion (Planned):**
+
+- Initially launched with UK VAT rules (`StandardUkVatStrategy` / `ZeroRatedUkVatStrategy`), with a future ADR planned to introduce region-specific tax/VAT and territorial compliance workflows for US, Australia, and additional markets.
 
 ---
 
