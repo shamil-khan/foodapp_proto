@@ -62,7 +62,7 @@ function parseArgs() {
 
 // --- Functions ---
 function getOutputFile(basePath) {
-  const outputDir = path.join(ROOT_DIR, '.dist');
+  const outputDir = path.join(ROOT_DIR, 'ai-dist');
 
   // Generate filename: apps/web -> ai-context-apps.web.txt
   const fileSuffix = basePath ? `-${basePath.replace(/[\\/]/g, '.')}` : '';

@@ -1,4 +1,5 @@
 # prod
+ai-dist/
 dist/
 .dist/
 
