@@ -1,0 +1,212 @@
+// apps/backend/docs/adr/_templates/curl-smoke-tests.txt (Part 1 of 2)
+# ==============================================================================
+# BACKEND LIVING SMOKE TESTS (@foodapp/backend)
+# ==============================================================================
+# Rules:
+# 1. Plain-text shell-safe format: copy any entire block (including # comments)
+#    and paste directly into bash/zsh without Markdown escaping issues.
+# 2. Update this file at Step 7 (Post-Task Living Doc Sync) whenever API routes,
+#    request payloads, or status codes are added, modified, or retired.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 0. Pre-Flight & Session Environment Variables (Copy & run once per terminal)
+# ------------------------------------------------------------------------------
+export BASE_URL="http://localhost:3000"
+export REST2_ID="a0000000-0000-4000-8000-000000000002"
+export REST1_ID="a0000000-0000-4000-8000-000000000001"
+
+# Login as Restaurant 2 (westminster-patty) OWNER
+export OWNER_TOKEN=$(curl -s -X POST "$BASE_URL/api/pos/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"subdomain":"westminster-patty","email":"staff1.0002@pos-tenant.co.uk","password":"Password123!"}' \
+  | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.token)")
+
+# Login as Restaurant 2 (westminster-patty) ORDER_TAKER
+export TAKER_TOKEN=$(curl -s -X POST "$BASE_URL/api/pos/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"subdomain":"westminster-patty","email":"staff5.0002@pos-tenant.co.uk","password":"Password123!"}' \
+  | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.token)")
+
+# Login as Restaurant 1 (smash360) OWNER
+export OTHER_TENANT_TOKEN=$(curl -s -X POST "$BASE_URL/api/pos/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"subdomain":"smash360","email":"staff1.0001@pos-tenant.co.uk","password":"Password123!"}' \
+  | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.token)")
+
+# Capture Menu Item IDs for Restaurant 2 & Restaurant 1
+export MENU_ITEM_ID=$(curl -s "$BASE_URL/api/restaurants/$REST2_ID/menu" \
+  | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.categories[0].items[0].id)")
+
+export REST1_ITEM_ID=$(curl -s "$BASE_URL/api/restaurants/$REST1_ID/menu" \
+  | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.categories[0].items[0].id)")
+
+echo "OWNER_TOKEN=${OWNER_TOKEN:0:20}..."
+echo "TAKER_TOKEN=${TAKER_TOKEN:0:20}..."
+echo "OTHER_TENANT_TOKEN=${OTHER_TENANT_TOKEN:0:20}..."
+echo "MENU_ITEM_ID=$MENU_ITEM_ID"
+echo "REST1_ITEM_ID=$REST1_ITEM_ID"
+
+# ==============================================================================
+# 1. PLATFORM HEALTH, OPENAPI & SUBDOMAIN CATALOG
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1.1 Health Check & OpenAPI 3.1 Spec
+# Endpoint : GET /api/health & GET /api/doc
+# Expected : 200 OK
+# ------------------------------------------------------------------------------
+curl -s "$BASE_URL/api/health" && echo ""
+curl -s -o /dev/null -w "OpenAPI /api/doc HTTP %{http_code}\n" "$BASE_URL/api/doc"
+
+# ------------------------------------------------------------------------------
+# 1.2 Resolve Storefront Restaurant by Subdomain (Happy Path)
+# Endpoint : GET /api/restaurants/by-subdomain/:subdomain
+# Expected : 200 OK
+# Payload  : { "restaurant": { "id": "a0000000-0000-4000-8000-000000000002", "subdomain": "westminster-patty", ... } }
+# ------------------------------------------------------------------------------
+curl -i -s "$BASE_URL/api/restaurants/by-subdomain/westminster-patty" && echo ""
+
+# ------------------------------------------------------------------------------
+# 1.3 Unknown Subdomain Lookup (Negative)
+# Endpoint : GET /api/restaurants/by-subdomain/:subdomain
+# Expected : 404 Not Found
+# Payload  : { "code": "NOT_FOUND", "error": "Restaurant not found or suspended" }
+# ------------------------------------------------------------------------------
+curl -i -s "$BASE_URL/api/restaurants/by-subdomain/non-existent-tenant" && echo ""
+
+# ==============================================================================
+# 2. IDENTITY, SUBDOMAIN LOGIN & DYNAMIC ROLES/RIGHTS (PBAC)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 2.1 Cross-Subdomain Staff Login Rejected (Negative)
+# Endpoint : POST /api/pos/auth/login
+# Expected : 401 Unauthorized
+# Payload  : { "code": "INVALID_CREDENTIALS", "error": "Invalid POS staff credentials." }
+# ------------------------------------------------------------------------------
+curl -i -s -X POST "$BASE_URL/api/pos/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"subdomain":"smash360","email":"staff1.0002@pos-tenant.co.uk","password":"Password123!"}' && echo ""
+
+# ------------------------------------------------------------------------------
+# 2.2 Inspect Active Actor & Effective Rights
+# Endpoint : GET /api/me
+# Expected : 200 OK
+# Payload  : { "actor": { "id": "<uuid>", "source": "POS_STAFF", "role": "OWNER", "permissions": [...] } }
+# ------------------------------------------------------------------------------
+curl -i -s "$BASE_URL/api/me" -H "Authorization: Bearer $OWNER_TOKEN" && echo ""
+
+# ------------------------------------------------------------------------------
+# 2.3 List Assignable Rights & Restaurant Roles
+# Endpoint : GET /api/pos/roles/rights & GET /api/pos/roles
+# Expected : 200 OK
+# ------------------------------------------------------------------------------
+curl -i -s "$BASE_URL/api/pos/roles/rights" -H "Authorization: Bearer $OWNER_TOKEN" && echo ""
+curl -i -s "$BASE_URL/api/pos/roles" -H "Authorization: Bearer $OWNER_TOKEN" && echo ""
+
+# ------------------------------------------------------------------------------
+# 2.4 Create, Update & Soft-Delete Custom Role (Redis Cache Invalidation)
+# Endpoint : POST /api/pos/roles -> PATCH /api/pos/roles/:roleId -> DELETE /api/pos/roles/:roleId
+# Expected : 201 Created -> 200 OK -> 200 OK
+# ------------------------------------------------------------------------------
+export CUSTOM_ROLE_ID=$(curl -s -X POST "$BASE_URL/api/pos/roles" \
+  -H "Authorization: Bearer $OWNER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"SHIFT_LEAD","description":"Can place & settle orders","permissions":["orders:read","orders:place","orders:settle"]}' \
+  | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.roleId)")
+
+echo "CUSTOM_ROLE_ID=$CUSTOM_ROLE_ID"
+
+curl -i -s -X PATCH "$BASE_URL/api/pos/roles/$CUSTOM_ROLE_ID" \
+  -H "Authorization: Bearer $OWNER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"description":"Read-only orders","permissions":["orders:read"]}' && echo ""
+
+curl -i -s -X DELETE "$BASE_URL/api/pos/roles/$CUSTOM_ROLE_ID" \
+  -H "Authorization: Bearer $OWNER_TOKEN" && echo ""
+
+# ------------------------------------------------------------------------------
+# 2.5 System Role Protection & In-Use Role Deletion Guard (Negative)
+# Expected : 403 SYSTEM_ROLE_LOCKED on OWNER patch; 409 ROLE_IN_USE on MANAGER delete
+# ------------------------------------------------------------------------------
+export OWNER_ROLE_ID=$(curl -s "$BASE_URL/api/pos/roles" \
+  -H "Authorization: Bearer $OWNER_TOKEN" \
+  | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.roles.find(r=>r.name==='OWNER').id)")
+
+curl -i -s -X PATCH "$BASE_URL/api/pos/roles/$OWNER_ROLE_ID" \
+  -H "Authorization: Bearer $OWNER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"permissions":["orders:read"]}' && echo ""
+
+export MANAGER_ROLE_ID=$(curl -s "$BASE_URL/api/pos/roles" \
+  -H "Authorization: Bearer $OWNER_TOKEN" \
+  | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.roles.find(r=>r.name==='MANAGER').id)")
+
+curl -i -s -X DELETE "$BASE_URL/api/pos/roles/$MANAGER_ROLE_ID" \
+  -H "Authorization: Bearer $OWNER_TOKEN" && echo ""
+
+# ==============================================================================
+# 3. POS ORDERING, SETTLEMENT, DOUBLE-ENTRY LEDGER & CROSS-TENANT ISOLATION
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 3.1 Place a New POS Order & Capture ORDER_ID
+# Endpoint : POST /api/pos/orders
+# Expected : 201 Created
+# Payload  : { "orderId": "<uuid>", "kdsTickets": { "orderId": "<uuid>", "stationSlips": { ... } } }
+# ------------------------------------------------------------------------------
+export ORDER_ID=$(curl -s -X POST "$BASE_URL/api/pos/orders" \
+  -H "Authorization: Bearer $OWNER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"orderSource\":\"DINE_IN\",\"items\":[{\"menuItemId\":\"$MENU_ITEM_ID\",\"quantity\":2}]}" \
+  | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.orderId)")
+
+echo "ORDER_ID=$ORDER_ID"
+
+# ------------------------------------------------------------------------------
+# 3.2 Cross-Tenant Order Query, Settle & Item Injection Blocked (Negative)
+# Expected : 403 TENANT_FORBIDDEN
+# ------------------------------------------------------------------------------
+curl -i -s "$BASE_URL/api/pos/orders?restaurantId=$REST1_ID" \
+  -H "Authorization: Bearer $OWNER_TOKEN" && echo ""
+
+curl -i -s -X POST "$BASE_URL/api/pos/orders/$ORDER_ID/settle" \
+  -H "Authorization: Bearer $OTHER_TENANT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"paymentMethod":"CASH","tipAmount":0}' && echo ""
+
+curl -i -s -X POST "$BASE_URL/api/pos/orders" \
+  -H "Authorization: Bearer $OWNER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"orderSource\":\"DINE_IN\",\"items\":[{\"menuItemId\":\"$REST1_ITEM_ID\",\"quantity\":1}]}" && echo ""
+
+# ------------------------------------------------------------------------------
+# 3.3 Missing Capability Right Blocked for ORDER_TAKER (Negative)
+# Expected : 403 INSUFFICIENT_RIGHTS
+# ------------------------------------------------------------------------------
+curl -i -s -X POST "$BASE_URL/api/pos/orders/$ORDER_ID/settle" \
+  -H "Authorization: Bearer $TAKER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"paymentMethod":"CASH","tipAmount":0}' && echo ""
+
+curl -i -s "$BASE_URL/api/ledger/restaurant" \
+  -H "Authorization: Bearer $TAKER_TOKEN" && echo ""
+
+# ------------------------------------------------------------------------------
+# 3.4 Settle Order (200 OK), Verify Double-Entry Ledger (200 OK) & Duplicate Guard (400)
+# Endpoint : POST /api/pos/orders/:id/settle & GET /api/ledger/restaurant
+# Expected : 200 OK -> 200 OK -> 400 ALREADY_SETTLED
+# ------------------------------------------------------------------------------
+curl -i -s -X POST "$BASE_URL/api/pos/orders/$ORDER_ID/settle" \
+  -H "Authorization: Bearer $OWNER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"paymentMethod":"CASH","tipAmount":0}' && echo ""
+
+curl -s "$BASE_URL/api/ledger/restaurant" \
+  -H "Authorization: Bearer $OWNER_TOKEN" && echo ""
+
+curl -i -s -X POST "$BASE_URL/api/pos/orders/$ORDER_ID/settle" \
+  -H "Authorization: Bearer $OWNER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"paymentMethod":"CASH","tipAmount":0}' && echo ""
