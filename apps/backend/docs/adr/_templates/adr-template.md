@@ -1,5 +1,3 @@
-// apps/backend/docs/adr/_templates/adr-template.md
-
 # ADR-XXX: <Feature / Architectural Decision Title>
 
 - **Status:** Proposed
@@ -7,7 +5,7 @@
 - **Agent Protocol:** [Backend AI Agent Execution Protocol](./_templates/agent-protocol.md)
 - **Tech Stack & System Baseline:** [Backend Tech Stack & System Baseline](./_templates/tech-stack.md)
 - **Living Smoke Tests:** [Backend Living Smoke Tests](./_templates/curl-smoke-tests.txt)
-- **Related ADRs:** `<e.g., 003-multi-tenant-authz.md>`
+- **Related ADRs:** `<e.g., 003-multi-tenant-rbac-rights-summary.md>`
 
 ---
 
@@ -42,10 +40,9 @@
 
 ## 4. Verification & Post-Task Completion Gate
 
-- [ ] **Pre-Code Handoff Checkpoint:** Generate `apps/backend/docs/adr/XXX-<task-slug>-handoff.md` after Q&A and obtain explicit user approval before generating code.
-- [ ] **Static Verification:** Run `pn fixed` and `pnpm --filter @foodapp/backend exec tsc --noEmit`.
-- [ ] **Runtime `curl` Verification:** Execute happy-path and negative (`400`, `401`, `403`, `409`) `curl` checks against running server and `/api/reference`.
-- [ ] **Post-Task Living Doc Sync (after user confirms tests pass):**
-  - [ ] Promote `XXX-<task-slug>-handoff.md` -> `apps/backend/docs/adr/XXX-<task-slug>-summary.md`.
-  - [ ] Update `_templates/tech-stack.md` with any new packages, DI bindings, or bounded-context changes.
-  - [ ] Update `_templates/curl-smoke-tests.txt` with new/modified endpoints (and regenerate `_templates/agent-protocol.md` if new guidelines were added).
+- [ ] **Pre-Code Handoff Section:** Append `## [WIP] Pre-Code Handoff Checkpoint` to this file after Q&A (`Status: In Progress`) and obtain explicit user approval before generating code.
+- [ ] **Static & DB Verification:** Run `pn db:reset` (if migrations/seeds changed), `pn fixed`, and `pnpm --filter @foodapp/backend exec tsc --noEmit`.
+- [ ] **Runtime `curl` Verification:** Execute happy-path and negative (`400`, `401`, `403`, `404`, `409`) `curl` checks against running server and `/api/reference`.
+- [ ] **Post-Task Single-File Finalization (after user confirms tests pass):**
+  - [ ] Remove `## [WIP] Pre-Code Handoff Checkpoint`, flip status to `Implemented & Verified`, and append `## Final Implementation Summary & Verification` at the bottom of this file.
+  - [ ] Update `apps/backend/docs/adr/README.md`, `_templates/tech-stack.md`, and `_templates/curl-smoke-tests.txt` (if changed).

@@ -54,6 +54,6 @@ _(See [`./_templates/tech-stack.md`](./_templates/tech-stack.md) for exact DI li
 All future ADRs follow a zero-boilerplate, living-doc workflow driven by [`./_templates/`](./_templates/):
 
 1. **Blueprint ([`_templates/adr-template.md`](./_templates/adr-template.md)):** Copy to `XXX-<feature-slug>.md` to define the problem, compare options (Pros/Cons), and outline bottom-up slices.
-2. **AI Execution Protocol ([`_templates/agent-protocol.md`](./_templates/agent-protocol.md)):** Enforces 1-question-at-a-time Q&A with Pros/Cons tables, a **Pre-Code Handoff Checkpoint** (`XXX-<task-slug>-handoff.md`), compile-first bottom-up generation (`Domain` -> `Application` -> `Infrastructure/DI` -> `HTTP/OpenAPI`), 100-line chunking, and 5-file batching.
+2. **AI Execution Protocol ([`_templates/agent-protocol.md`](./_templates/agent-protocol.md)):** Enforces 1-question-at-a-time Q&A with Pros/Cons tables, an in-place **Pre-Code Handoff Section** (`## [WIP] Pre-Code Handoff Checkpoint` inside `XXX-<task-slug>.md`), compile-first bottom-up generation (`Domain` -> `Application` -> `Infrastructure/DI` -> `HTTP/OpenAPI`), 100-line chunking, and 5-file batching.
 3. **Living System Baseline ([`_templates/tech-stack.md`](./_templates/tech-stack.md)):** Updated after every task with new packages, env vars, DI bindings, and bounded-context changes.
 4. **Living Smoke Tests ([`_templates/curl-smoke-tests.txt`](./_templates/curl-smoke-tests.txt)):** Plain-text, copy-paste safe `curl` suite with expected HTTP statuses and JSON payloads, kept in sync whenever endpoints evolve.

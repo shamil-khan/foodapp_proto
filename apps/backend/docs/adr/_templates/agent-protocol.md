@@ -58,7 +58,6 @@ Before drafting an ADR or asking Question 1, audit your active context to verify
 - **Database Migrations, Codegen & Seed Synchronization _(MUST HAVE)_:**
   - Whenever an ADR adds or alters PostgreSQL tables, columns, enums, or constraints (`packages/db/migrations/*.sql`), you **must** also update `packages/db/seeds/seed.sql` so `pn db:reset` (migrate -> codegen -> seed) runs cleanly and seeds realistic test fixtures for the new schema.
   - Always instruct the user to run `pn db:reset` before `pnpm --filter @foodapp/backend exec tsc --noEmit` so `@foodapp/db`'s `schema.generated.ts` reflects the new columns before backend typechecking.
-
 ## 4. Execution Workflow & Mandatory Gates
 
 ### Step 1: Informal Task Intake -> Auto-Draft ADR (`XXX-<task-slug>.md`)
@@ -72,16 +71,15 @@ Before drafting an ADR or asking Question 1, audit your active context to verify
 - Ask architectural and design questions **strictly one at a time**, providing concrete TypeScript code samples grounded in the user's actual codebase and up to 5 clear options (`Option A`–`Option E`).
 - **Mandatory Options Comparison:** Every question **must** include a concise Pros & Cons comparison (table or bullets) across the presented options plus a recommended default.
 
-### Step 3: Pre-Code Handoff Checkpoint (`XXX-<task-slug>-handoff.md`) & Approval Gate
+### Step 3: Pre-Code Handoff Section (In-Place in `XXX-<task-slug>.md`) & Approval Gate
 
 - Do **not** generate any package installation commands, setup scripts, or implementation code on your own—even if zero questions remain or zero new packages are required.
 - Once all architectural questions are answered and nothing remains unresolved:
-  1. Generate a **self-contained Task Execution Handoff file** (`apps/backend/docs/adr/XXX-<task-slug>-handoff.md`) containing:
-     - Full standalone AI prompt instructions & resume directives (so a fresh agent can seamlessly continue if context is lost or a loop occurs).
-     - All locked architectural decisions, chosen options, and GoF patterns.
-     - A **Compile-First Bottom-Up Roadmap** (`[ ]` checklist ordered `Domain` -> `Application` -> `Infrastructure/DI` -> `HTTP/OpenAPI`) so every batch compiles incrementally with `tsc --noEmit`.
+  1. Update `apps/backend/docs/adr/XXX-<task-slug>.md` in place:
+     - Change `- **Status:**` from `Proposed` to `In Progress`.
+     - Append a temporary **`## [WIP] Pre-Code Handoff Checkpoint`** section at the bottom containing standalone AI resume instructions, all locked architectural decisions/options, GoF/SOLID/Enterprise patterns, and a **Compile-First Bottom-Up Roadmap** (`[ ]` checklist ordered `Domain` -> `Application` -> `Infrastructure/DI` -> `HTTP/OpenAPI`) so a fresh agent can resume directly from this single ADR file if context is lost.
   2. Stop and explicitly ask the user:
-     _"All architectural questions are resolved and the task handoff checkpoint is ready. Would you like me to proceed with generating the implementation code?"_
+     _"All architectural questions are resolved and the pre-code handoff section is recorded in `XXX-<task-slug>.md`. Would you like me to proceed with generating the implementation code?"_
 - Wait until the user explicitly confirms code generation before outputting any package install commands, setup scripts, or source files.
 
 ### Step 4: Two-Phase Compile-First Code Generation
@@ -108,15 +106,16 @@ Before drafting an ADR or asking Question 1, audit your active context to verify
 
 - If the user reports issues from manual/`curl` testing, requests changes, or asks follow-up questions about the generated code or test steps, treat it as a revision cycle applying **all of the exact same rules above** (zero-assumption code checks, bounded-context isolation, GoF patterns, strict type-safety, compile-first ordering, 100-line chunking, 5-file batching, and updated `curl` steps).
 
-### Step 8: Completion Gate & Post-Task Living Doc Sync
+### Step 8: Completion Gate & Single-File Finalization + Living Doc Sync
 
-- Do **not** generate final summary deliverables until the user confirms that testing has passed and all queries are resolved. Once confirmed, complete these **4 Post-Task Deliverables**:
-  1. **Promote Handoff to Summary & Remove Handoff:**
-     - Create `apps/backend/docs/adr/XXX-<task-slug>-summary.md` (without `-done`) by expanding `XXX-<task-slug>-handoff.md` with chosen options, GoF/SOLID/Enterprise patterns, user commentary, installed package versions, env vars, file tree, and verified `curl` results.
-     - Explicitly instruct the user to delete `apps/backend/docs/adr/XXX-<task-slug>-handoff.md` (`rm ...`) so no stale WIP handoff file remains.
-     - Update `- **Status:**` in the original proposal `apps/backend/docs/adr/XXX-<task-slug>.md` to `Implemented (See ./XXX-<task-slug>-summary.md)`.
+- Do **not** finalize deliverables until the user confirms that testing has passed and all queries are resolved. Once confirmed, complete these **4 Post-Task Deliverables**:
+  1. **Finalize Single ADR File (`apps/backend/docs/adr/XXX-<task-slug>.md`):**
+     - Do **not** create a separate `-handoff.md` or `-summary.md` file.
+     - Update `- **Status:**` to `Implemented & Verified`.
+     - **Remove** the temporary `## [WIP] Pre-Code Handoff Checkpoint` section.
+     - Append **`## Final Implementation Summary & Verification`** at the bottom of `XXX-<task-slug>.md`, recording chosen options, GoF/SOLID/Enterprise patterns applied, user commentary, installed package versions, env vars, modified/created file tree, and verified `curl` results.
   2. **Update ADR Index (`apps/backend/docs/adr/README.md`):**
-     - Replace the `Proposed` row with a single **Implemented & Verified** row linking to `./XXX-<task-slug>-summary.md` and append `(replaces XXX-<task-slug>.md)` in the Notes column.
+     - Update the single row for `./XXX-<task-slug>.md` from `Proposed` / `In Progress` to **Implemented & Verified**.
   3. **Revise Living Tech Stack (`_templates/tech-stack.md`):**
      - Update package versions, env vars, bounded contexts, and `@inferdi/inferdi` DI bindings if changed.
   4. **Sync Living Smoke Tests (`_templates/curl-smoke-tests.txt`) & Protocol (`_templates/agent-protocol.md`):**
