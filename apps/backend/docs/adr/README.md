@@ -43,6 +43,7 @@ _(See [`./_templates/tech-stack.md`](./_templates/tech-stack.md) for exact DI li
 | [`005-decouple-order-settlement-saga.md`](./005-decouple-order-settlement-saga.md)                       | Decouple OrderSettlementSaga from Ledger Infrastructure               | **Proposed**               | Out-of-scope flaw captured during ADR-004                                                                  |
 | [`006-ordering-route-auth-middleware.md`](./006-ordering-route-auth-middleware.md)                       | Enforce HTTP Route-Level Permission Guards in `order-routes.ts`       | **Proposed**               | Out-of-scope flaw captured after ADR-004 verification                                                      |
 | [`007-flatten-business-unit-directory-hierarchy.md`](./007-flatten-business-unit-directory-hierarchy.md) | Flatten Business Unit Directory Hierarchy (`src/contexts/` -> `src/`) | **Implemented & Verified** | Relocated `identity`, `catalog`, `ordering`, and `ledger` directly under `src/`                            |
+| [`008-multi-branch-restaurants.md`](./008-multi-branch-restaurants.md)                                   | Multi-Branch Restaurants with Branch-Level PBAC & Menu Overrides      | **Proposed**               | Introduces Brand -> Branch hierarchy, geo-coordinates, and branch-specific pricing overrides               |
 
 **- Multi-Region & Territorial Expansion (Planned):**
 
