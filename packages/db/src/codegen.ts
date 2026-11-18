@@ -72,6 +72,46 @@ function toPascalCase(str: string): string {
     .join('');
 }
 
+function appendTableMetadata(lines: string[], tableName: string, columns: ColumnInfo[]): void {
+  const pascalName = toPascalCase(tableName);
+  const rowInterfaceName = `${pascalName}Row`;
+  const insertInterfaceName = `${pascalName}Insert`;
+  const metaConstName = `${pascalName}Table`;
+
+  // 1. Row Interface
+  lines.push(`export interface ${rowInterfaceName} {`);
+  for (const col of columns) {
+    lines.push(`  ${col.column_name}: ${mapPgToTsType(col)};`);
+  }
+  lines.push('}', '');
+
+  // 2. Insert Interface (columns with defaults or nullable are optional)
+  lines.push(`export interface ${insertInterfaceName} {`);
+  for (const col of columns) {
+    const isOptional = col.is_nullable === 'YES' || col.column_default !== null;
+    lines.push(`  ${col.column_name}${isOptional ? '?' : ''}: ${mapPgToTsType(col)};`);
+  }
+  lines.push('}', '');
+
+  // 3. Runtime Table & Quoted Column Metadata
+  lines.push(`export const ${metaConstName}: TableMeta<`);
+  lines.push('  {');
+  for (const col of columns) {
+    lines.push(`    ${col.column_name}: '"${col.column_name}"';`);
+  }
+  lines.push('  },');
+  lines.push(`  ${rowInterfaceName},`);
+  lines.push(`  ${insertInterfaceName}`);
+  lines.push('> = {');
+  lines.push(`  table: '"${tableName}"',`);
+  lines.push('  cols: {');
+  for (const col of columns) {
+    lines.push(`    ${col.column_name}: '"${col.column_name}"',`);
+  }
+  lines.push('  },');
+  lines.push('} as const;', '');
+}
+
 async function generateSchema(): Promise<void> {
   const client = new Client({
     connectionString: TARGET_DB_URL,
@@ -110,43 +150,7 @@ async function generateSchema(): Promise<void> {
     ];
 
     for (const [tableName, columns] of tables.entries()) {
-      const pascalName = toPascalCase(tableName);
-      const rowInterfaceName = `${pascalName}Row`;
-      const insertInterfaceName = `${pascalName}Insert`;
-      const metaConstName = `${pascalName}Table`;
-
-      // 1. Row Interface
-      lines.push(`export interface ${rowInterfaceName} {`);
-      for (const col of columns) {
-        lines.push(`  ${col.column_name}: ${mapPgToTsType(col)};`);
-      }
-      lines.push('}', '');
-
-      // 2. Insert Interface (columns with defaults or nullable are optional)
-      lines.push(`export interface ${insertInterfaceName} {`);
-      for (const col of columns) {
-        const isOptional = col.is_nullable === 'YES' || col.column_default !== null;
-        lines.push(`  ${col.column_name}${isOptional ? '?' : ''}: ${mapPgToTsType(col)};`);
-      }
-      lines.push('}', '');
-
-      // 3. Runtime Table & Quoted Column Metadata
-      lines.push(`export const ${metaConstName}: TableMeta<`);
-      lines.push('  {');
-      for (const col of columns) {
-        lines.push(`    ${col.column_name}: '"${col.column_name}"';`);
-      }
-      lines.push('  },');
-      lines.push(`  ${rowInterfaceName},`);
-      lines.push(`  ${insertInterfaceName}`);
-      lines.push('> = {');
-      lines.push(`  table: '"${tableName}"',`);
-      lines.push('  cols: {');
-      for (const col of columns) {
-        lines.push(`    ${col.column_name}: '"${col.column_name}"',`);
-      }
-      lines.push('  },');
-      lines.push('} as const;', '');
+      appendTableMetadata(lines, tableName, columns);
     }
 
     const outPath = path.join(import.meta.dirname, 'schema.generated.ts');

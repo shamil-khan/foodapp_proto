@@ -6,10 +6,13 @@ import type { CommandBus, QueryBus } from '@/core/application/cqrs';
 import type { DomainError, Result } from '@/core/domain/result';
 
 export class CatalogController {
-  constructor(
-    private readonly commandBus: CommandBus,
-    private readonly queryBus: QueryBus,
-  ) {}
+  private readonly commandBus: CommandBus;
+  private readonly queryBus: QueryBus;
+
+  constructor(commandBus: CommandBus, queryBus: QueryBus) {
+    this.commandBus = commandBus;
+    this.queryBus = queryBus;
+  }
 
   async listRestaurants(
     c: Context<AppEnv>,
@@ -111,20 +114,39 @@ export class CatalogController {
     );
 
     if (!result.ok) {
-      const status =
-        result.error.statusCode === 403
-          ? 403
-          : result.error.statusCode === 404
-            ? 404
-            : result.error.statusCode === 409
-              ? 409
-              : 400;
+      if (result.error.statusCode === 403) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          403,
+        );
+      }
+      if (result.error.statusCode === 404) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          404,
+        );
+      }
+      if (result.error.statusCode === 409) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          409,
+        );
+      }
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        status,
+        400,
       );
     }
 
@@ -136,6 +158,7 @@ export class CatalogController {
       200,
     );
   }
+
   async createRestaurantByAdmin(
     c: Context<AppEnv>,
     body: {
@@ -160,14 +183,30 @@ export class CatalogController {
     >('CreateRestaurantByAdmin', body);
 
     if (!result.ok) {
-      const status =
-        result.error.statusCode === 403 ? 403 : result.error.statusCode === 409 ? 409 : 400;
+      if (result.error.statusCode === 403) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          403,
+        );
+      }
+      if (result.error.statusCode === 409) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          409,
+        );
+      }
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        status,
+        400,
       );
     }
 
@@ -192,14 +231,30 @@ export class CatalogController {
     );
 
     if (!result.ok) {
-      const status =
-        result.error.statusCode === 403 ? 403 : result.error.statusCode === 404 ? 404 : 400;
+      if (result.error.statusCode === 403) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          403,
+        );
+      }
+      if (result.error.statusCode === 404) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          404,
+        );
+      }
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        status,
+        400,
       );
     }
 

@@ -394,7 +394,10 @@ export const createRestaurantByAdminRoute = createRoute({
       description: 'Validation error',
       content: {
         'application/json': {
-          schema: ValidationErrorResponseSchema,
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
         },
       },
     },
@@ -446,6 +449,14 @@ export const updateRestaurantStatusByAdminRoute = createRoute({
       content: {
         'application/json': {
           schema: SuccessFlagResponseSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain error',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
         },
       },
     },

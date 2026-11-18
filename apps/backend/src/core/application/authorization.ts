@@ -55,7 +55,13 @@ export class HasPermissionSpec extends CompositeSpecification<{
   request: RequestContext;
   permission: Permission;
 }> {
-  isSatisfiedBy({ request, permission }): boolean {
+  isSatisfiedBy({
+    request,
+    permission,
+  }: {
+    request: RequestContext;
+    permission: Permission;
+  }): boolean {
     if (request.actorSource === 'SYSTEM') return true;
     if (request.actorSource === 'GLOBAL_USER' && request.globalRole === 'PLATFORM_ADMIN') {
       return true;
@@ -69,7 +75,13 @@ export class SameRestaurantSpec extends CompositeSpecification<{
   request: RequestContext;
   targetRestaurantId: string;
 }> {
-  isSatisfiedBy({ request, targetRestaurantId }): boolean {
+  isSatisfiedBy({
+    request,
+    targetRestaurantId,
+  }: {
+    request: RequestContext;
+    targetRestaurantId: string;
+  }): boolean {
     if (request.actorSource === 'SYSTEM') return true;
     if (request.actorSource === 'GLOBAL_USER' && request.globalRole === 'PLATFORM_ADMIN') {
       return true;
@@ -83,7 +95,13 @@ export class SameUserSpec extends CompositeSpecification<{
   request: RequestContext;
   targetUserId: string;
 }> {
-  isSatisfiedBy({ request, targetUserId }): boolean {
+  isSatisfiedBy({
+    request,
+    targetUserId,
+  }: {
+    request: RequestContext;
+    targetUserId: string;
+  }): boolean {
     if (request.actorSource === 'SYSTEM') return true;
     if (request.actorSource === 'GLOBAL_USER' && request.globalRole === 'PLATFORM_ADMIN') {
       return true;
@@ -91,13 +109,17 @@ export class SameUserSpec extends CompositeSpecification<{
     return request.actorSource === 'GLOBAL_USER' && request.actorId === targetUserId;
   }
 }
+
 // GoF Pattern: Strategy — Request-scoped authorization policy injected via DI
 export class AuthorizationPolicy {
+  private readonly request: RequestContext;
   private readonly hasPermissionSpec = new HasPermissionSpec();
   private readonly sameRestaurantSpec = new SameRestaurantSpec();
   private readonly sameUserSpec = new SameUserSpec();
 
-  constructor(private readonly request: RequestContext) {}
+  constructor(request: RequestContext) {
+    this.request = request;
+  }
 
   isPlatformAdmin(): boolean {
     return (

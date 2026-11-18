@@ -152,6 +152,14 @@ export const getMyLoyaltyBalanceRoute = createRoute({
         },
       },
     },
+    403: {
+      description: 'Forbidden: missing loyalty:read right',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
   },
 });
 
@@ -190,12 +198,23 @@ export const redeemLoyaltyPointsRoute = createRoute({
       description: 'Insufficient points or validation error',
       content: {
         'application/json': {
-          schema: ValidationErrorResponseSchema,
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
         },
       },
     },
     401: {
       description: 'Unauthorized customer session',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    403: {
+      description: 'Forbidden: missing loyalty:redeem right',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,

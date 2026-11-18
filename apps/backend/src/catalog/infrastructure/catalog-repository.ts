@@ -4,12 +4,12 @@ import {
   type KdsRoutingTarget,
   MenuItemTable,
   MenuSnapshotTable,
+  type Pool,
   RestaurantTable,
   sqlInsert,
   sqlSelect,
   sqlUpdate,
 } from '@foodapp/db';
-import type { Pool } from 'pg';
 import {
   type CompiledMenuSnapshot,
   MenuSnapshotBuilder,
@@ -17,7 +17,11 @@ import {
 } from '@/catalog/domain/menu-snapshot-builder';
 
 export class CatalogRepository {
-  constructor(private readonly pool: Pool) {}
+  private readonly pool: Pool;
+
+  constructor(pool: Pool) {
+    this.pool = pool;
+  }
 
   async getMenuItemRestaurantId(menuItemId: string): Promise<string | null> {
     const mCols = MenuItemTable.cols;
@@ -86,6 +90,157 @@ export class CatalogRepository {
     };
   }
 
+  private async fetchModifiersByItem(
+    itemIds: readonly string[],
+  ): Promise<Map<string, SnapshotModifierDto[]>> {
+    const modsByItem = new Map<string, SnapshotModifierDto[]>();
+    if (itemIds.length === 0) return modsByItem;
+
+    const modCols = ItemModifierTable.cols;
+    const modQuery = sqlSelect(ItemModifierTable)
+      .select([
+        modCols.id,
+        modCols.menuItemId,
+        modCols.name,
+        modCols.extraPrice,
+      ])
+      .whereIn(modCols.menuItemId, itemIds)
+      .activeOnly()
+      .compile();
+
+    const { rows: modifiers } = await this.pool.query<typeof modQuery._result>(
+      modQuery.text,
+      modQuery.params,
+    );
+
+    for (const mod of modifiers) {
+      const list = modsByItem.get(mod.menuItemId) ?? [];
+      list.push({
+        id: mod.id,
+        name: mod.name,
+        extraPrice: Number.parseFloat(mod.extraPrice),
+      });
+      modsByItem.set(mod.menuItemId, list);
+    }
+
+    return modsByItem;
+  }
+
+  private async populateMenuGraph(
+    builder: MenuSnapshotBuilder,
+    restaurantId: string,
+  ): Promise<void> {
+    const cCols = CategoryTable.cols;
+    const catQuery = sqlSelect(CategoryTable)
+      .select([
+        cCols.id,
+        cCols.name,
+        cCols.sortWeight,
+      ])
+      .whereEq(cCols.restaurantId, restaurantId)
+      .activeOnly()
+      .orderBy(cCols.sortWeight, 'ASC')
+      .compile();
+
+    const { rows: categories } = await this.pool.query<typeof catQuery._result>(
+      catQuery.text,
+      catQuery.params,
+    );
+
+    if (categories.length === 0) return;
+
+    for (const cat of categories) {
+      builder.addCategory(cat.id, cat.name, cat.sortWeight);
+    }
+
+    const mCols = MenuItemTable.cols;
+    const itemQuery = sqlSelect(MenuItemTable)
+      .select([
+        mCols.id,
+        mCols.categoryId,
+        mCols.name,
+        mCols.description,
+        mCols.basePrice,
+        mCols.vatRate,
+        mCols.allergenFlags,
+        mCols.kdsTarget,
+        mCols.imageUrl,
+      ])
+      .whereIn(
+        mCols.categoryId,
+        categories.map((c) => c.id),
+      )
+      .whereEq(mCols.isActive, true)
+      .activeOnly()
+      .compile();
+
+    const { rows: items } = await this.pool.query<typeof itemQuery._result>(
+      itemQuery.text,
+      itemQuery.params,
+    );
+
+    const modsByItem = await this.fetchModifiersByItem(items.map((i) => i.id));
+
+    for (const item of items) {
+      builder.addMenuItem(item.categoryId, {
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        basePrice: Number.parseFloat(item.basePrice),
+        vatRate: Number.parseFloat(item.vatRate),
+        allergenFlags: item.allergenFlags ?? [],
+        kdsTarget: item.kdsTarget as KdsRoutingTarget,
+        imageUrl: item.imageUrl,
+        modifiers: modsByItem.get(item.id) ?? [],
+      });
+    }
+  }
+
+  private async persistCompiledSnapshot(
+    restaurantId: string,
+    compiled: CompiledMenuSnapshot,
+    actorId: string,
+  ): Promise<void> {
+    const sCols = MenuSnapshotTable.cols;
+    const existingSnap = sqlSelect(MenuSnapshotTable)
+      .select([
+        sCols.id,
+      ])
+      .whereEq(sCols.restaurantId, restaurantId)
+      .compile();
+
+    const snapRes = await this.pool.query<typeof existingSnap._result>(
+      existingSnap.text,
+      existingSnap.params,
+    );
+
+    if (snapRes.rows[0]) {
+      const updateSnap = sqlUpdate(MenuSnapshotTable)
+        .set({
+          versionHash: compiled.versionHash,
+          serializedMenu: compiled as unknown as Record<string, unknown>,
+        })
+        .withAuditBump(actorId)
+        .whereEq(sCols.restaurantId, restaurantId)
+        .compile();
+
+      await this.pool.query(updateSnap.text, updateSnap.params);
+      return;
+    }
+
+    const insertSnap = sqlInsert(MenuSnapshotTable)
+      .values({
+        restaurantId,
+        versionHash: compiled.versionHash,
+        serializedMenu: compiled as unknown as Record<string, unknown>,
+        createdBy: actorId,
+        updatedBy: actorId,
+      })
+      .compile();
+
+    await this.pool.query(insertSnap.text, insertSnap.params);
+  }
+
   async rebuildAndPersistSnapshot(
     restaurantId: string,
     actorId: string,
@@ -114,141 +269,9 @@ export class CatalogRepository {
       restaurant.postcodeSector,
     );
 
-    const cCols = CategoryTable.cols;
-    const catQuery = sqlSelect(CategoryTable)
-      .select([
-        cCols.id,
-        cCols.name,
-        cCols.sortWeight,
-      ])
-      .whereEq(cCols.restaurantId, restaurantId)
-      .activeOnly()
-      .orderBy(cCols.sortWeight, 'ASC')
-      .compile();
-
-    const { rows: categories } = await this.pool.query<typeof catQuery._result>(
-      catQuery.text,
-      catQuery.params,
-    );
-
-    if (categories.length > 0) {
-      for (const cat of categories) {
-        builder.addCategory(cat.id, cat.name, cat.sortWeight);
-      }
-
-      const mCols = MenuItemTable.cols;
-      const itemQuery = sqlSelect(MenuItemTable)
-        .select([
-          mCols.id,
-          mCols.categoryId,
-          mCols.name,
-          mCols.description,
-          mCols.basePrice,
-          mCols.vatRate,
-          mCols.allergenFlags,
-          mCols.kdsTarget,
-          mCols.imageUrl,
-        ])
-        .whereIn(
-          mCols.categoryId,
-          categories.map((c) => c.id),
-        )
-        .whereEq(mCols.isActive, true)
-        .activeOnly()
-        .compile();
-
-      const { rows: items } = await this.pool.query<typeof itemQuery._result>(
-        itemQuery.text,
-        itemQuery.params,
-      );
-
-      const modsByItem = new Map<string, SnapshotModifierDto[]>();
-      if (items.length > 0) {
-        const modCols = ItemModifierTable.cols;
-        const modQuery = sqlSelect(ItemModifierTable)
-          .select([
-            modCols.id,
-            modCols.menuItemId,
-            modCols.name,
-            modCols.extraPrice,
-          ])
-          .whereIn(
-            modCols.menuItemId,
-            items.map((i) => i.id),
-          )
-          .activeOnly()
-          .compile();
-
-        const { rows: modifiers } = await this.pool.query<typeof modQuery._result>(
-          modQuery.text,
-          modQuery.params,
-        );
-
-        for (const mod of modifiers) {
-          const list = modsByItem.get(mod.menuItemId) ?? [];
-          list.push({
-            id: mod.id,
-            name: mod.name,
-            extraPrice: Number.parseFloat(mod.extraPrice),
-          });
-          modsByItem.set(mod.menuItemId, list);
-        }
-      }
-
-      for (const item of items) {
-        builder.addMenuItem(item.categoryId, {
-          id: item.id,
-          name: item.name,
-          description: item.description,
-          basePrice: Number.parseFloat(item.basePrice),
-          vatRate: Number.parseFloat(item.vatRate),
-          allergenFlags: item.allergenFlags ?? [],
-          kdsTarget: item.kdsTarget as KdsRoutingTarget,
-          imageUrl: item.imageUrl,
-          modifiers: modsByItem.get(item.id) ?? [],
-        });
-      }
-    }
-
+    await this.populateMenuGraph(builder, restaurantId);
     const compiled = builder.build();
-
-    const sCols = MenuSnapshotTable.cols;
-    const existingSnap = sqlSelect(MenuSnapshotTable)
-      .select([
-        sCols.id,
-      ])
-      .whereEq(sCols.restaurantId, restaurantId)
-      .compile();
-
-    const snapRes = await this.pool.query<typeof existingSnap._result>(
-      existingSnap.text,
-      existingSnap.params,
-    );
-
-    if (snapRes.rows[0]) {
-      const updateSnap = sqlUpdate(MenuSnapshotTable)
-        .set({
-          versionHash: compiled.versionHash,
-          serializedMenu: compiled as unknown as Record<string, unknown>,
-        })
-        .withAuditBump(actorId)
-        .whereEq(sCols.restaurantId, restaurantId)
-        .compile();
-
-      await this.pool.query(updateSnap.text, updateSnap.params);
-    } else {
-      const insertSnap = sqlInsert(MenuSnapshotTable)
-        .values({
-          restaurantId,
-          versionHash: compiled.versionHash,
-          serializedMenu: compiled as unknown as Record<string, unknown>,
-          createdBy: actorId,
-          updatedBy: actorId,
-        })
-        .compile();
-
-      await this.pool.query(insertSnap.text, insertSnap.params);
-    }
+    await this.persistCompiledSnapshot(restaurantId, compiled, actorId);
 
     return compiled;
   }

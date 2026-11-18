@@ -51,6 +51,7 @@ async function cleanUp() {
       count++;
     } catch (err) {
       /* Skip errors */
+      console.log(`❌ Error: ${err}`);
     }
   }
 

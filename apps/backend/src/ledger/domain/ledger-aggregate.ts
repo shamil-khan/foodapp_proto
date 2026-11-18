@@ -145,7 +145,7 @@ export class FinancialLedgerAggregate extends AggregateRoot<LedgerAggregateState
     return ok(ledger);
   }
 
-  protected apply(event: DomainEvent): void {
+  protected apply(event: DomainEvent<unknown>): void {
     if (event.eventType === 'SettlementRecorded') {
       const p = event.payload as unknown as SettlementRecordedPayload;
       this.state.orderId = p.orderId;

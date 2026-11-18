@@ -23,11 +23,15 @@ interface LoyaltyRowDto {
 }
 
 export class LedgerController {
-  constructor(
-    private readonly commandBus: CommandBus,
-    private readonly queryBus: QueryBus,
-    private readonly request: RequestContext,
-  ) {}
+  private readonly commandBus: CommandBus;
+  private readonly queryBus: QueryBus;
+  private readonly request: RequestContext;
+
+  constructor(commandBus: CommandBus, queryBus: QueryBus, request: RequestContext) {
+    this.commandBus = commandBus;
+    this.queryBus = queryBus;
+    this.request = request;
+  }
 
   async getRestaurantLedger(
     c: Context<AppEnv>,
@@ -117,6 +121,7 @@ export class LedgerController {
       throw error;
     }
   }
+
   async redeemLoyaltyPoints(
     c: Context<AppEnv>,
     body: {
@@ -140,13 +145,21 @@ export class LedgerController {
     });
 
     if (!result.ok) {
-      const status = result.error.statusCode === 403 ? 403 : 400;
+      if (result.error.statusCode === 403) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          403,
+        );
+      }
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        status,
+        400,
       );
     }
 

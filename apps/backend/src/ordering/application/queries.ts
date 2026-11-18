@@ -1,5 +1,4 @@
-import { OrderMilestoneLogTable, OrderTable, sqlSelect } from '@foodapp/db';
-import type { Pool } from 'pg';
+import { OrderMilestoneLogTable, OrderTable, type Pool, sqlSelect } from '@foodapp/db';
 import type { AuthorizationPolicy } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
 import { DomainError } from '@/core/domain/result';
@@ -28,10 +27,13 @@ export interface GetRestaurantOrdersQuery extends Query<PosOrderSummaryDto[]> {
 export class GetRestaurantOrdersHandler
   implements QueryHandler<GetRestaurantOrdersQuery, PosOrderSummaryDto[]>
 {
-  constructor(
-    private readonly pool: Pool,
-    private readonly authz: AuthorizationPolicy,
-  ) {}
+  private readonly pool: Pool;
+  private readonly authz: AuthorizationPolicy;
+
+  constructor(pool: Pool, authz: AuthorizationPolicy) {
+    this.pool = pool;
+    this.authz = authz;
+  }
 
   async execute(query: GetRestaurantOrdersQuery): Promise<PosOrderSummaryDto[]> {
     const access = this.authz.assertRestaurantAccess(query.restaurantId, 'orders:read');

@@ -2,6 +2,8 @@ import './env.ts';
 import { Pool } from 'pg';
 import { createClient } from 'redis';
 
+export type { Pool, PoolClient } from 'pg';
+
 export const pgPool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });

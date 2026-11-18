@@ -6,9 +6,9 @@ import {
   type KdsRoutingTarget,
   MenuItemTable,
   type OrderSource,
+  type Pool,
   sqlSelect,
 } from '@foodapp/db';
-import type { Pool } from 'pg';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
@@ -45,12 +45,22 @@ export class PlacePosOrderHandler
       }>
     >
 {
+  private readonly pool: Pool;
+  private readonly orderRepo: OrderRepository;
+  private readonly authz: AuthorizationPolicy;
+  private readonly request: RequestContext;
+
   constructor(
-    private readonly pool: Pool,
-    private readonly orderRepo: OrderRepository,
-    private readonly authz: AuthorizationPolicy,
-    private readonly request: RequestContext,
-  ) {}
+    pool: Pool,
+    orderRepo: OrderRepository,
+    authz: AuthorizationPolicy,
+    request: RequestContext,
+  ) {
+    this.pool = pool;
+    this.orderRepo = orderRepo;
+    this.authz = authz;
+    this.request = request;
+  }
 
   async execute(cmd: PlacePosOrderCommand): Promise<
     Result<{
@@ -111,6 +121,7 @@ export class PlacePosOrderHandler
           ),
         );
       }
+
       const resolvedMods: {
         name: string;
         extraPrice: number;
@@ -188,11 +199,15 @@ export interface SettlePosOrderCommand extends Command<Result<void>> {
 }
 
 export class SettlePosOrderHandler implements CommandHandler<SettlePosOrderCommand, Result<void>> {
-  constructor(
-    private readonly orderRepo: OrderRepository,
-    private readonly authz: AuthorizationPolicy,
-    private readonly request: RequestContext,
-  ) {}
+  private readonly orderRepo: OrderRepository;
+  private readonly authz: AuthorizationPolicy;
+  private readonly request: RequestContext;
+
+  constructor(orderRepo: OrderRepository, authz: AuthorizationPolicy, request: RequestContext) {
+    this.orderRepo = orderRepo;
+    this.authz = authz;
+    this.request = request;
+  }
 
   async execute(cmd: SettlePosOrderCommand): Promise<Result<void>> {
     const order = await this.orderRepo.findById(cmd.orderId);

@@ -272,7 +272,10 @@ export const settlePosOrderRoute = createRoute({
       description: 'Invalid order state transition or validation error',
       content: {
         'application/json': {
-          schema: ValidationErrorResponseSchema,
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
         },
       },
     },

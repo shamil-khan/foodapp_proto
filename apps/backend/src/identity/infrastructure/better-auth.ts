@@ -49,6 +49,14 @@ export const auth = betterAuth({
       const client = await ensureRedisConnected();
       await client.del(`auth:${key}`);
     },
+    getAndDelete: async (key) => {
+      const client = await ensureRedisConnected();
+      return await client.getDel(`auth:${key}`);
+    },
+    increment: async (key, value = 1) => {
+      const client = await ensureRedisConnected();
+      return await client.incrBy(`auth:${key}`, value);
+    },
   },
 
   emailAndPassword: {

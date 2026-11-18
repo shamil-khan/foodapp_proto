@@ -1,12 +1,13 @@
 import type { StatusCode } from 'hono/utils/http-status';
 
 export class AppError extends Error {
-  constructor(
-    public readonly status: StatusCode,
-    public readonly errorCode: string,
-    message: string,
-  ) {
+  public readonly status: StatusCode;
+  public readonly errorCode: string;
+
+  constructor(status: StatusCode, errorCode: string, message: string) {
     super(message);
+    this.status = status;
+    this.errorCode = errorCode;
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }

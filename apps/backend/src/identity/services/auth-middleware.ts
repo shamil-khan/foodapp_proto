@@ -6,11 +6,16 @@ import { type AppEnv, type RequestContext, rootContainer } from '@/container';
 import { resolveDefaultPermissionsForActor } from '@/core/application/authorization';
 import { auth } from '@/identity/infrastructure/better-auth';
 import { PosTokenService } from '@/identity/infrastructure/pos-token-service';
+import type { RolePermissionCache } from '@/identity/infrastructure/role-permission-cache';
 import { AppLogger } from '@/logger';
 
 const posTokenService = new PosTokenService();
 
-export const initDiScope = inferdiHono({
+export const initDiScope = inferdiHono<
+  typeof rootContainer,
+  AppEnv,
+  ReturnType<typeof rootContainer.createScope>
+>({
   container: rootContainer,
   createScope: async (root, c) => {
     const requestId = c.get('requestId') ?? c.req.header('X-Request-Id') ?? crypto.randomUUID();
@@ -25,7 +30,7 @@ export const initDiScope = inferdiHono({
 
     const posClaims = await posTokenService.verifyRequestToken(c);
     if (posClaims) {
-      const roleCache = root.get('rolePermissionCache');
+      const roleCache: RolePermissionCache = root.get('rolePermissionCache');
       const livePermissions = posClaims.roleId
         ? await roleCache.getPermissionsForRole(posClaims.roleId)
         : posClaims.permissions;
@@ -48,7 +53,10 @@ export const initDiScope = inferdiHono({
       });
 
       if (session?.user) {
-        const globalRole = (session.user.role as PlatformRole) ?? 'CUSTOMER';
+        const userWithRole = session.user as {
+          role?: string;
+        };
+        const globalRole = (userWithRole.role as PlatformRole) ?? 'CUSTOMER';
         context = {
           requestId,
           actorId: session.user.id,
@@ -68,6 +76,7 @@ export const initDiScope = inferdiHono({
     });
   },
 });
+
 export const requireGlobalUser = (allowedRoles?: readonly PlatformRole[]) =>
   createMiddleware<AppEnv>(async (c, next) => {
     const request = c.var.di.get('request');

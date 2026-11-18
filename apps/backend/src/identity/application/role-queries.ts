@@ -1,11 +1,11 @@
 import {
+  type Pool,
   StaffRolePermissionTable,
   StaffRoleTable,
   sqlSelect,
   TENANT_PERMISSIONS,
   type TenantPermission,
 } from '@foodapp/db';
-import type { Pool } from 'pg';
 import type { AuthorizationPolicy } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
 import { DomainError } from '@/core/domain/result';
@@ -36,10 +36,13 @@ export interface GetRestaurantStaffRolesQuery extends Query<StaffRoleWithRightsD
 export class GetRestaurantStaffRolesHandler
   implements QueryHandler<GetRestaurantStaffRolesQuery, StaffRoleWithRightsDto[]>
 {
-  constructor(
-    private readonly pool: Pool,
-    private readonly authz: AuthorizationPolicy,
-  ) {}
+  private readonly pool: Pool;
+  private readonly authz: AuthorizationPolicy;
+
+  constructor(pool: Pool, authz: AuthorizationPolicy) {
+    this.pool = pool;
+    this.authz = authz;
+  }
 
   async execute(query: GetRestaurantStaffRolesQuery): Promise<StaffRoleWithRightsDto[]> {
     const access = this.authz.assertRestaurantAccess(query.restaurantId, 'staff:roles:manage');

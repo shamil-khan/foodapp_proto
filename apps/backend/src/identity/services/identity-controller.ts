@@ -10,12 +10,15 @@ import { PosTokenService } from '@/identity/infrastructure/pos-token-service';
 
 export class IdentityController {
   private readonly posTokenService = new PosTokenService();
+  private readonly commandBus: CommandBus;
+  private readonly queryBus: QueryBus;
+  private readonly request: RequestContext;
 
-  constructor(
-    private readonly commandBus: CommandBus,
-    private readonly queryBus: QueryBus,
-    private readonly request: RequestContext,
-  ) {}
+  constructor(commandBus: CommandBus, queryBus: QueryBus, request: RequestContext) {
+    this.commandBus = commandBus;
+    this.queryBus = queryBus;
+    this.request = request;
+  }
 
   async loginPosStaff(
     c: Context<AppEnv>,
@@ -50,7 +53,12 @@ export class IdentityController {
       {
         success: true as const,
         token,
-        staff: result.value,
+        staff: {
+          ...result.value,
+          permissions: [
+            ...result.value.permissions,
+          ],
+        },
       },
       200,
     );
@@ -91,6 +99,7 @@ export class IdentityController {
       200,
     );
   }
+
   async listAssignablePermissions(c: Context<AppEnv>) {
     try {
       const rights = await this.queryBus.ask<readonly TenantPermission[]>(
@@ -197,14 +206,30 @@ export class IdentityController {
     });
 
     if (!result.ok) {
-      const status =
-        result.error.statusCode === 403 ? 403 : result.error.statusCode === 409 ? 409 : 400;
+      if (result.error.statusCode === 403) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          403,
+        );
+      }
+      if (result.error.statusCode === 409) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          409,
+        );
+      }
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        status,
+        400,
       );
     }
 
@@ -230,14 +255,30 @@ export class IdentityController {
     });
 
     if (!result.ok) {
-      const status =
-        result.error.statusCode === 403 ? 403 : result.error.statusCode === 404 ? 404 : 400;
+      if (result.error.statusCode === 403) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          403,
+        );
+      }
+      if (result.error.statusCode === 404) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          404,
+        );
+      }
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        status,
+        400,
       );
     }
 
@@ -260,20 +301,39 @@ export class IdentityController {
     });
 
     if (!result.ok) {
-      const status =
-        result.error.statusCode === 403
-          ? 403
-          : result.error.statusCode === 404
-            ? 404
-            : result.error.statusCode === 409
-              ? 409
-              : 400;
+      if (result.error.statusCode === 403) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          403,
+        );
+      }
+      if (result.error.statusCode === 404) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          404,
+        );
+      }
+      if (result.error.statusCode === 409) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          409,
+        );
+      }
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        status,
+        400,
       );
     }
 
@@ -300,14 +360,30 @@ export class IdentityController {
     });
 
     if (!result.ok) {
-      const status =
-        result.error.statusCode === 403 ? 403 : result.error.statusCode === 404 ? 404 : 400;
+      if (result.error.statusCode === 403) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          403,
+        );
+      }
+      if (result.error.statusCode === 404) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          404,
+        );
+      }
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        status,
+        400,
       );
     }
 

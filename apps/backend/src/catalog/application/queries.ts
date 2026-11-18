@@ -1,11 +1,11 @@
 import {
+  type Pool,
   RestaurantLayoutTable,
   RestaurantTable,
   type redisClient,
   SYSTEM_ACTORS,
   sqlSelect,
 } from '@foodapp/db';
-import type { Pool } from 'pg';
 import type { CompiledMenuSnapshot } from '@/catalog/domain/menu-snapshot-builder';
 import type { CatalogRepository } from '@/catalog/infrastructure/catalog-repository';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
@@ -36,7 +36,11 @@ export interface GetRestaurantsQuery extends Query<StorefrontRestaurantDto[]> {
 export class GetRestaurantsHandler
   implements QueryHandler<GetRestaurantsQuery, StorefrontRestaurantDto[]>
 {
-  constructor(private readonly pool: Pool) {}
+  private readonly pool: Pool;
+
+  constructor(pool: Pool) {
+    this.pool = pool;
+  }
 
   async execute(query: GetRestaurantsQuery): Promise<StorefrontRestaurantDto[]> {
     const { cols } = RestaurantTable;
@@ -123,6 +127,7 @@ export class GetRestaurantsHandler
     });
   }
 }
+
 export interface GetRestaurantBySubdomainQuery extends Query<StorefrontRestaurantDto | null> {
   readonly subdomain: string;
 }
@@ -130,7 +135,11 @@ export interface GetRestaurantBySubdomainQuery extends Query<StorefrontRestauran
 export class GetRestaurantBySubdomainHandler
   implements QueryHandler<GetRestaurantBySubdomainQuery, StorefrontRestaurantDto | null>
 {
-  constructor(private readonly pool: Pool) {}
+  private readonly pool: Pool;
+
+  constructor(pool: Pool) {
+    this.pool = pool;
+  }
 
   async execute(query: GetRestaurantBySubdomainQuery): Promise<StorefrontRestaurantDto | null> {
     const { cols } = RestaurantTable;
@@ -199,10 +208,13 @@ export interface GetRestaurantMenuSnapshotQuery extends Query<CompiledMenuSnapsh
 export class GetRestaurantMenuSnapshotHandler
   implements QueryHandler<GetRestaurantMenuSnapshotQuery, CompiledMenuSnapshot | null>
 {
-  constructor(
-    private readonly catalogRepo: CatalogRepository,
-    private readonly redis: RedisClientType,
-  ) {}
+  private readonly catalogRepo: CatalogRepository;
+  private readonly redis: RedisClientType;
+
+  constructor(catalogRepo: CatalogRepository, redis: RedisClientType) {
+    this.catalogRepo = catalogRepo;
+    this.redis = redis;
+  }
 
   async execute(query: GetRestaurantMenuSnapshotQuery): Promise<CompiledMenuSnapshot | null> {
     const cacheKey = `menu:snapshot:${query.restaurantId}`;

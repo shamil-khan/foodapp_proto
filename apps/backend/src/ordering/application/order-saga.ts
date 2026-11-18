@@ -1,3 +1,4 @@
+import { ALL_PERMISSIONS } from '@foodapp/db';
 import type { EventBus } from '@/core/application/event-bus';
 import type { PgSagaRepository } from '@/core/infrastructure/pg-saga-repository';
 import { RecordOrderSettlementHandler } from '@/ledger/application/commands';
@@ -14,15 +15,17 @@ interface OrderSettlementSagaState extends Record<string, unknown> {
 
 export class OrderSettlementSaga {
   private static readonly SAGA_TYPE = 'OrderSettlementSaga';
+  private readonly ledgerRepo: LedgerRepository;
+  private readonly sagaRepo: PgSagaRepository;
 
-  constructor(
-    private readonly ledgerRepo: LedgerRepository,
-    private readonly sagaRepo: PgSagaRepository,
-  ) {}
+  constructor(ledgerRepo: LedgerRepository, sagaRepo: PgSagaRepository) {
+    this.ledgerRepo = ledgerRepo;
+    this.sagaRepo = sagaRepo;
+  }
 
   public register(eventBus: EventBus): void {
     eventBus.subscribe('PosOrderSettled', async (event) => {
-      await this.onOrderSettled(event as PosOrderSettledEvent);
+      await this.onOrderSettled(event as unknown as PosOrderSettledEvent);
     });
   }
 
@@ -49,6 +52,7 @@ export class OrderSettlementSaga {
         actorId,
         actorSource: 'SYSTEM',
         restaurantId: event.payload.restaurantId,
+        permissions: ALL_PERMISSIONS,
       });
 
       const result = await handler.execute({

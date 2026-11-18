@@ -74,8 +74,10 @@ export const initLogger = async () => {
 
 export class AppLogger {
   private readonly logtape: Logger;
+  private readonly fallbackRequestId?: string;
 
-  constructor(private readonly fallbackRequestId?: string) {
+  constructor(fallbackRequestId?: string) {
+    this.fallbackRequestId = fallbackRequestId;
     this.logtape = getLogger([
       'foodapp',
       'backend',

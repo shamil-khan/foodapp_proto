@@ -14,12 +14,22 @@ export interface UpdateMenuItemPriceCommand extends Command<Result<void>> {
 export class UpdateMenuItemPriceHandler
   implements CommandHandler<UpdateMenuItemPriceCommand, Result<void>>
 {
+  private readonly catalogRepo: CatalogRepository;
+  private readonly eventBus: EventBus;
+  private readonly authz: AuthorizationPolicy;
+  private readonly request: RequestContext;
+
   constructor(
-    private readonly catalogRepo: CatalogRepository,
-    private readonly eventBus: EventBus,
-    private readonly authz: AuthorizationPolicy,
-    private readonly request: RequestContext,
-  ) {}
+    catalogRepo: CatalogRepository,
+    eventBus: EventBus,
+    authz: AuthorizationPolicy,
+    request: RequestContext,
+  ) {
+    this.catalogRepo = catalogRepo;
+    this.eventBus = eventBus;
+    this.authz = authz;
+    this.request = request;
+  }
 
   async execute(cmd: UpdateMenuItemPriceCommand): Promise<Result<void>> {
     if (cmd.newBasePrice < 0) {

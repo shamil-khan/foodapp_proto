@@ -1,5 +1,4 @@
-import { RestaurantStaffTable, sqlSelect, UserTable } from '@foodapp/db';
-import type { Pool } from 'pg';
+import { type Pool, RestaurantStaffTable, sqlSelect, UserTable } from '@foodapp/db';
 import type { RequestContext } from '@/container';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
 
@@ -17,10 +16,13 @@ export interface GetCurrentActorQuery extends Query<ActiveActorProfileDto | null
 export class GetCurrentActorHandler
   implements QueryHandler<GetCurrentActorQuery, ActiveActorProfileDto | null>
 {
-  constructor(
-    private readonly pool: Pool,
-    private readonly request: RequestContext,
-  ) {}
+  private readonly pool: Pool;
+  private readonly request: RequestContext;
+
+  constructor(pool: Pool, request: RequestContext) {
+    this.pool = pool;
+    this.request = request;
+  }
 
   async execute(): Promise<ActiveActorProfileDto | null> {
     if (this.request.actorSource === 'POS_STAFF') {

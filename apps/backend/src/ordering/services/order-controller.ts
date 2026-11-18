@@ -7,11 +7,15 @@ import type { PosOrderSummaryDto } from '@/ordering/application/queries';
 import type { KdsTicketOutput } from '@/ordering/domain/order-visitor';
 
 export class OrderController {
-  constructor(
-    private readonly commandBus: CommandBus,
-    private readonly queryBus: QueryBus,
-    private readonly request: RequestContext,
-  ) {}
+  private readonly commandBus: CommandBus;
+  private readonly queryBus: QueryBus;
+  private readonly request: RequestContext;
+
+  constructor(commandBus: CommandBus, queryBus: QueryBus, request: RequestContext) {
+    this.commandBus = commandBus;
+    this.queryBus = queryBus;
+    this.request = request;
+  }
 
   async listOrders(
     c: Context<AppEnv>,
@@ -105,14 +109,30 @@ export class OrderController {
     });
 
     if (!result.ok) {
-      const status =
-        result.error.statusCode === 403 ? 403 : result.error.statusCode === 404 ? 404 : 400;
+      if (result.error.statusCode === 403) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          403,
+        );
+      }
+      if (result.error.statusCode === 404) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          404,
+        );
+      }
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        status,
+        400,
       );
     }
 
@@ -136,14 +156,30 @@ export class OrderController {
     });
 
     if (!result.ok) {
-      const status =
-        result.error.statusCode === 403 ? 403 : result.error.statusCode === 404 ? 404 : 400;
+      if (result.error.statusCode === 403) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          403,
+        );
+      }
+      if (result.error.statusCode === 404) {
+        return c.json(
+          {
+            code: result.error.code,
+            error: result.error.message,
+          },
+          404,
+        );
+      }
       return c.json(
         {
           code: result.error.code,
           error: result.error.message,
         },
-        status,
+        400,
       );
     }
 

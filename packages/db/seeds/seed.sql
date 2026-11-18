@@ -2,6 +2,7 @@ CREATE FUNCTION pg_temp.seed_actor() RETURNS UUID LANGUAGE SQL IMMUTABLE AS $$
   SELECT '00000000-0000-4000-85ee-000000000001'::UUID;
 $$;
 
+
 -- 1. SEED 5 GLOBAL ADMINS
 INSERT INTO
   "User" (
@@ -117,6 +118,7 @@ VALUES
   )
 ON CONFLICT ("userId") DO NOTHING;
 
+
 INSERT INTO
   "User" (
     "email",
@@ -136,6 +138,7 @@ SELECT
 FROM
   generate_series(2, 10) AS i
 ON CONFLICT ("email") DO NOTHING;
+
 
 -- 4. SEED 10 UK RESTAURANTS WITH UNIQUE SUBDOMAINS (*.fapp.com)
 INSERT INTO
@@ -296,6 +299,7 @@ VALUES
   )
 ON CONFLICT ("id") DO NOTHING;
 
+
 -- 5. SEED LAYOUTS & PAYMENT CONFIGS FOR ALL 10 RESTAURANTS
 INSERT INTO
   "RestaurantLayout" (
@@ -334,6 +338,7 @@ FROM
   "Restaurant"
 ON CONFLICT ("restaurantId") DO NOTHING;
 
+
 -- 5B. SEED DEFAULT STAFF ROLES & RIGHTS FOR ALL 10 RESTAURANTS
 INSERT INTO
   "StaffRole" (
@@ -355,12 +360,29 @@ FROM
   "Restaurant" r
   CROSS JOIN (
     VALUES
-      ('OWNER', 'Full restaurant ownership, ledger, staff & role administration', TRUE),
-      ('ADMIN', 'Restaurant administrator with full operational and role rights', FALSE),
-      ('MANAGER', 'Floor manager with catalog pricing, ordering, and settlement rights', FALSE),
-      ('ORDER_TAKER', 'Front-of-house POS cashier with order placement and viewing rights', FALSE)
+      (
+        'OWNER',
+        'Full restaurant ownership, ledger, staff & role administration',
+        TRUE
+      ),
+      (
+        'ADMIN',
+        'Restaurant administrator with full operational and role rights',
+        FALSE
+      ),
+      (
+        'MANAGER',
+        'Floor manager with catalog pricing, ordering, and settlement rights',
+        FALSE
+      ),
+      (
+        'ORDER_TAKER',
+        'Front-of-house POS cashier with order placement and viewing rights',
+        FALSE
+      )
   ) AS role_def (role_name, role_desc, is_sys)
 ON CONFLICT DO NOTHING;
+
 
 INSERT INTO
   "StaffRolePermission" (
@@ -401,6 +423,7 @@ FROM
   ) AS perm_def (role_name, permission) ON sr."name" = perm_def.role_name
 ON CONFLICT DO NOTHING;
 
+
 -- 6. SEED 5 PHYSICAL DINING TABLES PER RESTAURANT (50 TOTAL)
 INSERT INTO
   "DiningTable" (
@@ -427,6 +450,7 @@ FROM
   "Restaurant" r
   CROSS JOIN generate_series(1, 5) AS t_idx
 ON CONFLICT ("activeQrSessionToken") DO NOTHING;
+
 
 -- 7. SEED 10 ISOLATED STAFF MEMBERS PER RESTAURANT LINKED TO ROLE ID (100 TOTAL)
 INSERT INTO
@@ -467,6 +491,7 @@ FROM
   JOIN "StaffRole" sr ON sr."restaurantId" = r."id"
   AND sr."name" = s.role_name
 ON CONFLICT ("email") DO NOTHING;
+
 
 -- 8. SEED CATEGORIES, SMASH BURGER MENU ITEMS & MODIFIERS
 INSERT INTO
@@ -572,7 +597,10 @@ WITH
     SELECT
       r."id" AS restaurant_id,
       md5(r."id"::TEXT || now()::TEXT) AS version_hash,
-      to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS generated_at,
+      to_char(
+        now() AT TIME ZONE 'UTC',
+        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+      ) AS generated_at,
       r."name" AS restaurant_name,
       r."postcodeSector" AS postcode_sector
     FROM
@@ -601,7 +629,7 @@ SELECT
     'generatedAt',
     sp.generated_at,
     'categories',
-    COALESCE(
+    coalesce(
       (
         SELECT
           jsonb_agg(
@@ -613,7 +641,7 @@ SELECT
               'sortWeight',
               c."sortWeight",
               'items',
-              COALESCE(
+              coalesce(
                 (
                   SELECT
                     jsonb_agg(
@@ -629,13 +657,15 @@ SELECT
                         'vatRate',
                         m."vatRate"::DOUBLE PRECISION,
                         'allergenFlags',
-                        to_jsonb(COALESCE(m."allergenFlags", '{}'::TEXT[])),
+                        to_jsonb(
+                          coalesce(m."allergenFlags", '{}'::TEXT[])
+                        ),
                         'kdsTarget',
                         m."kdsTarget",
                         'imageUrl',
                         m."imageUrl",
                         'modifiers',
-                        COALESCE(
+                        coalesce(
                           (
                             SELECT
                               jsonb_agg(
@@ -689,6 +719,7 @@ SET
   "versionHash" = EXCLUDED."versionHash",
   "serializedMenu" = EXCLUDED."serializedMenu",
   "updatedAt" = CURRENT_TIMESTAMP;
+
 
 -- 10. SEED 20 HISTORICAL ORDERS (15 IN-STORE POS + 5 SHOWCASE DELIVERY) & LEDGERS
 WITH

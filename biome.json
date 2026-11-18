@@ -32,11 +32,32 @@
     "lineEnding": "lf",
     "attributePosition": "auto"
   },
-
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "suspicious": {
+        "noExplicitAny": "error"
+      },
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error"
+      },
+      "style": {
+        "useConst": "error",
+        "useImportType": "off",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "lodash": "Use lodash-es instead."
+            }
+          }
+        }
+      },
+      "complexity": {
+        "noExcessiveCognitiveComplexity": "warn"
+      }
     }
   },
   "javascript": {

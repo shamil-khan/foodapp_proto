@@ -1,5 +1,4 @@
-import { FinancialLedgerTable, LoyaltyLedgerTable, sqlSelect } from '@foodapp/db';
-import type { Pool } from 'pg';
+import { FinancialLedgerTable, LoyaltyLedgerTable, type Pool, sqlSelect } from '@foodapp/db';
 import type { AuthorizationPolicy } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
 import { DomainError } from '@/core/domain/result';
@@ -13,12 +12,15 @@ export interface GetRestaurantLedgerQuery extends Query<unknown[]> {
 export class GetRestaurantLedgerHandler
   implements QueryHandler<GetRestaurantLedgerQuery, unknown[]>
 {
-  constructor(
-    private readonly pool: Pool,
-    private readonly authz: AuthorizationPolicy,
-  ) {}
+  private readonly pool: Pool;
+  private readonly authz: AuthorizationPolicy;
 
-  async execute(query: GetRestaurantLedgerQuery) {
+  constructor(pool: Pool, authz: AuthorizationPolicy) {
+    this.pool = pool;
+    this.authz = authz;
+  }
+
+  async execute(query: GetRestaurantLedgerQuery): Promise<unknown[]> {
     const access = this.authz.assertRestaurantAccess(query.restaurantId, 'ledger:read');
     if (!access.ok) {
       throw new DomainError(access.error.code, access.error.message, 403);
@@ -65,12 +67,18 @@ export class GetUserLoyaltyBalanceHandler
       }
     >
 {
-  constructor(
-    private readonly pool: Pool,
-    private readonly authz: AuthorizationPolicy,
-  ) {}
+  private readonly pool: Pool;
+  private readonly authz: AuthorizationPolicy;
 
-  async execute(query: GetUserLoyaltyBalanceQuery) {
+  constructor(pool: Pool, authz: AuthorizationPolicy) {
+    this.pool = pool;
+    this.authz = authz;
+  }
+
+  async execute(query: GetUserLoyaltyBalanceQuery): Promise<{
+    totalPoints: number;
+    history: unknown[];
+  }> {
     const access = this.authz.assertUserAccess(query.userId, 'loyalty:read');
     if (!access.ok) {
       throw new DomainError(access.error.code, access.error.message, 403);

@@ -1,12 +1,16 @@
-import type { TableMeta } from './schema.generated.ts';
-
-export interface CompiledQuery<TResult = unknown> {
+export interface CompiledQuery<TResult = Record<string, unknown>> {
   readonly text: string;
   readonly params: unknown[];
-  readonly _result?: TResult;
+  readonly _result: TResult;
 }
 
-type AnyTable = TableMeta<Record<string, string>, Record<string, unknown>, Record<string, unknown>>;
+export interface AnyTable {
+  readonly table: string;
+  readonly cols: Record<string, string>;
+  readonly _row?: unknown;
+  readonly _insert?: unknown;
+}
+
 type RowOf<T extends AnyTable> = NonNullable<T['_row']>;
 type InsertOf<T extends AnyTable> = NonNullable<T['_insert']>;
 type ColKey<T extends AnyTable> = Extract<keyof T['cols'], string>;
@@ -20,6 +24,7 @@ type KeyFromColRef<T extends AnyTable, TRef extends ColRef<T>> = {
 }[ColKey<T>];
 
 class SelectBuilder<T extends AnyTable, TSelected extends ColKey<T> = ColKey<T>> {
+  private readonly meta: T;
   private selectedCols: ColRef<T>[] = [];
   private readonly conditions: string[] = [];
   private readonly params: unknown[] = [];
@@ -27,7 +32,9 @@ class SelectBuilder<T extends AnyTable, TSelected extends ColKey<T> = ColKey<T>>
   private limitVal?: number;
   private offsetVal?: number;
 
-  constructor(private readonly meta: T) {}
+  constructor(meta: T) {
+    this.meta = meta;
+  }
 
   select<TRef extends ColRef<T>>(
     columns: readonly TRef[],
@@ -143,16 +150,19 @@ class SelectBuilder<T extends AnyTable, TSelected extends ColKey<T> = ColKey<T>>
     return {
       text: `${parts.join(' ')};`,
       params: this.params,
-    };
+    } as CompiledQuery<Pick<RowOf<T>, TSelected>>;
   }
 }
 
 class InsertBuilder<T extends AnyTable, TReturning extends ColKey<T> = never> {
+  private readonly meta: T;
   private rowValues?: InsertOf<T>;
   private returningCols: ColRef<T>[] = [];
   private conflictTarget?: ColRef<T> | readonly ColRef<T>[];
 
-  constructor(private readonly meta: T) {}
+  constructor(meta: T) {
+    this.meta = meta;
+  }
 
   values(data: InsertOf<T>): this {
     this.rowValues = data;
@@ -202,18 +212,21 @@ class InsertBuilder<T extends AnyTable, TReturning extends ColKey<T> = never> {
 
     return {
       text: `${parts.join(' ')};`,
-      params,
-    };
+      params: params,
+    } as CompiledQuery<Pick<RowOf<T>, TReturning>>;
   }
 }
 
 class UpdateBuilder<T extends AnyTable> {
+  private readonly meta: T;
   private setValues?: Partial<RowOf<T>>;
   private bumpVersion = false;
   private readonly conditions: string[] = [];
   private readonly params: unknown[] = [];
 
-  constructor(private readonly meta: T) {}
+  constructor(meta: T) {
+    this.meta = meta;
+  }
 
   set(data: Partial<RowOf<T>>): this {
     this.setValues = data;
@@ -270,7 +283,7 @@ class UpdateBuilder<T extends AnyTable> {
     return {
       text: `${parts.join(' ')};`,
       params: this.params,
-    };
+    } as CompiledQuery;
   }
 }
 

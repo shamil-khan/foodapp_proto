@@ -1,6 +1,5 @@
 import * as crypto from 'node:crypto';
-import { LoyaltyLedgerTable, sqlSelect } from '@foodapp/db';
-import type { Pool } from 'pg';
+import { LoyaltyLedgerTable, type Pool, sqlSelect } from '@foodapp/db';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
@@ -30,10 +29,13 @@ export class RecordOrderSettlementHandler
       }>
     >
 {
-  constructor(
-    private readonly ledgerRepo: LedgerRepository,
-    private readonly request: RequestContext,
-  ) {}
+  private readonly ledgerRepo: LedgerRepository;
+  private readonly request: RequestContext;
+
+  constructor(ledgerRepo: LedgerRepository, request: RequestContext) {
+    this.ledgerRepo = ledgerRepo;
+    this.request = request;
+  }
 
   async execute(cmd: RecordOrderSettlementCommand): Promise<
     Result<{
@@ -93,12 +95,22 @@ export class RedeemLoyaltyPointsHandler
       }>
     >
 {
+  private readonly pool: Pool;
+  private readonly ledgerRepo: LedgerRepository;
+  private readonly authz: AuthorizationPolicy;
+  private readonly request: RequestContext;
+
   constructor(
-    private readonly pool: Pool,
-    private readonly ledgerRepo: LedgerRepository,
-    private readonly authz: AuthorizationPolicy,
-    private readonly request: RequestContext,
-  ) {}
+    pool: Pool,
+    ledgerRepo: LedgerRepository,
+    authz: AuthorizationPolicy,
+    request: RequestContext,
+  ) {
+    this.pool = pool;
+    this.ledgerRepo = ledgerRepo;
+    this.authz = authz;
+    this.request = request;
+  }
 
   async execute(cmd: RedeemLoyaltyPointsCommand): Promise<
     Result<{

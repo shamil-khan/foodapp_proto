@@ -22,11 +22,13 @@ export abstract class CompositeSpecification<T> implements Specification<T> {
 }
 
 class AndSpecification<T> extends CompositeSpecification<T> {
-  constructor(
-    private readonly left: Specification<T>,
-    private readonly right: Specification<T>,
-  ) {
+  private readonly left: Specification<T>;
+  private readonly right: Specification<T>;
+
+  constructor(left: Specification<T>, right: Specification<T>) {
     super();
+    this.left = left;
+    this.right = right;
   }
 
   isSatisfiedBy(candidate: T): boolean {
@@ -35,11 +37,13 @@ class AndSpecification<T> extends CompositeSpecification<T> {
 }
 
 class OrSpecification<T> extends CompositeSpecification<T> {
-  constructor(
-    private readonly left: Specification<T>,
-    private readonly right: Specification<T>,
-  ) {
+  private readonly left: Specification<T>;
+  private readonly right: Specification<T>;
+
+  constructor(left: Specification<T>, right: Specification<T>) {
     super();
+    this.left = left;
+    this.right = right;
   }
 
   isSatisfiedBy(candidate: T): boolean {
@@ -48,8 +52,11 @@ class OrSpecification<T> extends CompositeSpecification<T> {
 }
 
 class NotSpecification<T> extends CompositeSpecification<T> {
-  constructor(private readonly spec: Specification<T>) {
+  private readonly spec: Specification<T>;
+
+  constructor(spec: Specification<T>) {
     super();
+    this.spec = spec;
   }
 
   isSatisfiedBy(candidate: T): boolean {

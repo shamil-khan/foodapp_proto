@@ -1,12 +1,12 @@
 import {
   ALL_PERMISSIONS,
   type Permission,
+  type Pool,
   type redisClient,
   StaffRolePermissionTable,
   StaffRoleTable,
   sqlSelect,
 } from '@foodapp/db';
-import type { Pool } from 'pg';
 
 type RedisClientType = typeof redisClient;
 
@@ -14,11 +14,13 @@ const ALLOWED_PERMISSION_SET = new Set<string>(ALL_PERMISSIONS);
 
 export class RolePermissionCache {
   private static readonly TTL_SECONDS = 3600;
+  private readonly pool: Pool;
+  private readonly redis: RedisClientType;
 
-  constructor(
-    private readonly pool: Pool,
-    private readonly redis: RedisClientType,
-  ) {}
+  constructor(pool: Pool, redis: RedisClientType) {
+    this.pool = pool;
+    this.redis = redis;
+  }
 
   private keyForRole(roleId: string): string {
     return `role:perms:${roleId}`;

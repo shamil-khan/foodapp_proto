@@ -2,6 +2,7 @@ import * as crypto from 'node:crypto';
 import {
   DEFAULT_ROLE_PERMISSIONS,
   PaymentConfigTable,
+  type Pool,
   RestaurantLayoutTable,
   RestaurantStaffTable,
   RestaurantTable,
@@ -12,7 +13,6 @@ import {
   sqlUpdate,
   type TenantRole,
 } from '@foodapp/db';
-import type { Pool } from 'pg';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
@@ -51,11 +51,15 @@ export class CreateRestaurantByAdminHandler
       }>
     >
 {
-  constructor(
-    private readonly pool: Pool,
-    private readonly authz: AuthorizationPolicy,
-    private readonly request: RequestContext,
-  ) {}
+  private readonly pool: Pool;
+  private readonly authz: AuthorizationPolicy;
+  private readonly request: RequestContext;
+
+  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
+    this.pool = pool;
+    this.authz = authz;
+    this.request = request;
+  }
 
   async execute(cmd: CreateRestaurantByAdminCommand): Promise<
     Result<{
@@ -225,11 +229,15 @@ export interface UpdateRestaurantStatusByAdminCommand extends Command<Result<voi
 export class UpdateRestaurantStatusByAdminHandler
   implements CommandHandler<UpdateRestaurantStatusByAdminCommand, Result<void>>
 {
-  constructor(
-    private readonly pool: Pool,
-    private readonly authz: AuthorizationPolicy,
-    private readonly request: RequestContext,
-  ) {}
+  private readonly pool: Pool;
+  private readonly authz: AuthorizationPolicy;
+  private readonly request: RequestContext;
+
+  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
+    this.pool = pool;
+    this.authz = authz;
+    this.request = request;
+  }
 
   async execute(cmd: UpdateRestaurantStatusByAdminCommand): Promise<Result<void>> {
     const permCheck = this.authz.assertPermission('platform:restaurants:manage');

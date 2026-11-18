@@ -1,11 +1,11 @@
 import {
   FinancialLedgerTable,
   LoyaltyLedgerTable,
+  type Pool,
   RestaurantTable,
   sqlInsert,
   sqlSelect,
 } from '@foodapp/db';
-import type { Pool } from 'pg';
 import type { EventBus } from '@/core/application/event-bus';
 import type { PgEventStore } from '@/core/infrastructure/pg-event-store';
 import {
@@ -14,11 +14,15 @@ import {
 } from '@/ledger/domain/ledger-aggregate';
 
 export class LedgerRepository {
-  constructor(
-    private readonly pool: Pool,
-    private readonly eventStore: PgEventStore,
-    private readonly eventBus: EventBus,
-  ) {}
+  private readonly pool: Pool;
+  private readonly eventStore: PgEventStore;
+  private readonly eventBus: EventBus;
+
+  constructor(pool: Pool, eventStore: PgEventStore, eventBus: EventBus) {
+    this.pool = pool;
+    this.eventStore = eventStore;
+    this.eventBus = eventBus;
+  }
 
   async findById(ledgerId: string): Promise<FinancialLedgerAggregate | null> {
     const { events, memento } = await this.eventStore.loadStream<LedgerAggregateState>(ledgerId);

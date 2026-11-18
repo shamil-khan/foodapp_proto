@@ -7,11 +7,13 @@ type RedisClientType = typeof redisClient;
 
 export class MenuCacheInvalidationHandler {
   private readonly log = new AppLogger('catalog-cache');
+  private readonly catalogRepo: CatalogRepository;
+  private readonly redis: RedisClientType;
 
-  constructor(
-    private readonly catalogRepo: CatalogRepository,
-    private readonly redis: RedisClientType,
-  ) {}
+  constructor(catalogRepo: CatalogRepository, redis: RedisClientType) {
+    this.catalogRepo = catalogRepo;
+    this.redis = redis;
+  }
 
   public register(eventBus: EventBus): void {
     eventBus.subscribe('RestaurantMenuUpdated', async (event) => {

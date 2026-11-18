@@ -1,4 +1,5 @@
 import {
+  type Pool,
   RestaurantStaffTable,
   StaffRolePermissionTable,
   StaffRoleTable,
@@ -10,7 +11,6 @@ import {
   type TenantPermission,
   type TenantRole,
 } from '@foodapp/db';
-import type { Pool } from 'pg';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
@@ -47,11 +47,15 @@ export class CreateStaffRoleHandler
       }>
     >
 {
-  constructor(
-    private readonly pool: Pool,
-    private readonly authz: AuthorizationPolicy,
-    private readonly request: RequestContext,
-  ) {}
+  private readonly pool: Pool;
+  private readonly authz: AuthorizationPolicy;
+  private readonly request: RequestContext;
+
+  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
+    this.pool = pool;
+    this.authz = authz;
+    this.request = request;
+  }
 
   async execute(cmd: CreateStaffRoleCommand): Promise<
     Result<{
@@ -143,6 +147,7 @@ export class CreateStaffRoleHandler
     }
   }
 }
+
 export interface UpdateStaffRoleCommand extends Command<Result<void>> {
   readonly roleId: string;
   readonly name?: string;
@@ -153,12 +158,22 @@ export interface UpdateStaffRoleCommand extends Command<Result<void>> {
 export class UpdateStaffRoleHandler
   implements CommandHandler<UpdateStaffRoleCommand, Result<void>>
 {
+  private readonly pool: Pool;
+  private readonly rolePermissionCache: RolePermissionCache;
+  private readonly authz: AuthorizationPolicy;
+  private readonly request: RequestContext;
+
   constructor(
-    private readonly pool: Pool,
-    private readonly rolePermissionCache: RolePermissionCache,
-    private readonly authz: AuthorizationPolicy,
-    private readonly request: RequestContext,
-  ) {}
+    pool: Pool,
+    rolePermissionCache: RolePermissionCache,
+    authz: AuthorizationPolicy,
+    request: RequestContext,
+  ) {
+    this.pool = pool;
+    this.rolePermissionCache = rolePermissionCache;
+    this.authz = authz;
+    this.request = request;
+  }
 
   async execute(cmd: UpdateStaffRoleCommand): Promise<Result<void>> {
     const rCols = StaffRoleTable.cols;
@@ -259,6 +274,7 @@ export class UpdateStaffRoleHandler
     }
   }
 }
+
 export interface DeleteStaffRoleCommand extends Command<Result<void>> {
   readonly roleId: string;
 }
@@ -266,12 +282,22 @@ export interface DeleteStaffRoleCommand extends Command<Result<void>> {
 export class DeleteStaffRoleHandler
   implements CommandHandler<DeleteStaffRoleCommand, Result<void>>
 {
+  private readonly pool: Pool;
+  private readonly rolePermissionCache: RolePermissionCache;
+  private readonly authz: AuthorizationPolicy;
+  private readonly request: RequestContext;
+
   constructor(
-    private readonly pool: Pool,
-    private readonly rolePermissionCache: RolePermissionCache,
-    private readonly authz: AuthorizationPolicy,
-    private readonly request: RequestContext,
-  ) {}
+    pool: Pool,
+    rolePermissionCache: RolePermissionCache,
+    authz: AuthorizationPolicy,
+    request: RequestContext,
+  ) {
+    this.pool = pool;
+    this.rolePermissionCache = rolePermissionCache;
+    this.authz = authz;
+    this.request = request;
+  }
 
   async execute(cmd: DeleteStaffRoleCommand): Promise<Result<void>> {
     const rCols = StaffRoleTable.cols;
@@ -343,11 +369,15 @@ export interface AssignStaffRoleCommand extends Command<Result<void>> {
 export class AssignStaffRoleHandler
   implements CommandHandler<AssignStaffRoleCommand, Result<void>>
 {
-  constructor(
-    private readonly pool: Pool,
-    private readonly authz: AuthorizationPolicy,
-    private readonly request: RequestContext,
-  ) {}
+  private readonly pool: Pool;
+  private readonly authz: AuthorizationPolicy;
+  private readonly request: RequestContext;
+
+  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
+    this.pool = pool;
+    this.authz = authz;
+    this.request = request;
+  }
 
   async execute(cmd: AssignStaffRoleCommand): Promise<Result<void>> {
     const sCols = RestaurantStaffTable.cols;

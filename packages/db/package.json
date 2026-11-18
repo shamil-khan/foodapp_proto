@@ -20,7 +20,8 @@
     "format:migrations": "for f in migrations/*.sql; do sql-formatter -c sql-formatter.json --fix \"$f\"; done",
     "format:seeds": "for f in seeds/*.sql; do sql-formatter -c sql-formatter.json --fix \"$f\"; done",
     "format": "biome format --write src && pnpm format:migrations && pnpm format:seeds",
-    "lint": "biome lint src"
+    "lint": "biome lint src",
+    "fixed": "biome check --write src"
   },
   "dependencies": {
     "pg": "^8.23.1",

@@ -5,12 +5,15 @@ import type { LoyaltyPointsEligibleEvent } from '@/ordering/domain/order-events'
 
 export class LoyaltyPointsEventHandler {
   private readonly log = new AppLogger('loyalty-events');
+  private readonly ledgerRepo: LedgerRepository;
 
-  constructor(private readonly ledgerRepo: LedgerRepository) {}
+  constructor(ledgerRepo: LedgerRepository) {
+    this.ledgerRepo = ledgerRepo;
+  }
 
   public register(eventBus: EventBus): void {
     eventBus.subscribe('LoyaltyPointsEligible', async (event) => {
-      const e = event as LoyaltyPointsEligibleEvent;
+      const e = event as unknown as LoyaltyPointsEligibleEvent;
       if (e.payload.pointsEarned <= 0) return;
 
       await this.ledgerRepo.recordLoyaltyTransaction({

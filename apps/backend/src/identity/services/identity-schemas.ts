@@ -377,10 +377,13 @@ export const createStaffRoleRoute = createRoute({
       },
     },
     400: {
-      description: 'Validation error',
+      description: 'Validation or domain error',
       content: {
         'application/json': {
-          schema: ValidationErrorResponseSchema,
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
         },
       },
     },
@@ -435,6 +438,14 @@ export const updateStaffRoleRoute = createRoute({
         },
       },
     },
+    400: {
+      description: 'Validation or domain error',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
     403: {
       description: 'Forbidden or OWNER role locked',
       content: {
@@ -475,6 +486,14 @@ export const deleteStaffRoleRoute = createRoute({
       content: {
         'application/json': {
           schema: SuccessFlagResponseSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain error',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
         },
       },
     },
@@ -534,6 +553,14 @@ export const assignStaffRoleRoute = createRoute({
       content: {
         'application/json': {
           schema: SuccessFlagResponseSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain error',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
         },
       },
     },

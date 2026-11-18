@@ -1,5 +1,4 @@
-import { SagaStateTable, sqlInsert, sqlSelect, sqlUpdate } from '@foodapp/db';
-import type { Pool } from 'pg';
+import { type Pool, SagaStateTable, sqlInsert, sqlSelect, sqlUpdate } from '@foodapp/db';
 
 export type SagaStatus = 'RUNNING' | 'COMPLETED' | 'COMPENSATING' | 'FAILED';
 
@@ -15,7 +14,11 @@ export interface SagaRecord<TState = Record<string, unknown>> {
 }
 
 export class PgSagaRepository {
-  constructor(private readonly pool: Pool) {}
+  private readonly pool: Pool;
+
+  constructor(pool: Pool) {
+    this.pool = pool;
+  }
 
   async findOrCreate<TState extends Record<string, unknown>>(
     sagaType: string,

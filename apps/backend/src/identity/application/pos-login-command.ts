@@ -1,12 +1,12 @@
 import * as crypto from 'node:crypto';
 import {
   DEFAULT_ROLE_PERMISSIONS,
+  type Pool,
   RestaurantStaffTable,
   RestaurantTable,
   sqlSelect,
   type TenantRole,
 } from '@foodapp/db';
-import type { Pool } from 'pg';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
 import type { PosStaffSessionClaims } from '@/identity/domain/auth-actor';
@@ -35,13 +35,17 @@ function verifyStaffPassword(plainPassword: string, storedHash: string): boolean
 
   return false;
 }
+
 export class LoginPosStaffHandler
   implements CommandHandler<LoginPosStaffCommand, Result<PosStaffSessionClaims>>
 {
-  constructor(
-    private readonly pool: Pool,
-    private readonly rolePermissionCache: RolePermissionCache,
-  ) {}
+  private readonly pool: Pool;
+  private readonly rolePermissionCache: RolePermissionCache;
+
+  constructor(pool: Pool, rolePermissionCache: RolePermissionCache) {
+    this.pool = pool;
+    this.rolePermissionCache = rolePermissionCache;
+  }
 
   async execute(cmd: LoginPosStaffCommand): Promise<Result<PosStaffSessionClaims>> {
     const cleanSubdomain = cmd.subdomain.trim().toLowerCase();

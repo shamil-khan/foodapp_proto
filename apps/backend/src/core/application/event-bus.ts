@@ -1,12 +1,12 @@
 import type { DomainEvent } from '@/core/domain/domain-event';
 
-export type DomainEventHandler<TEvent extends DomainEvent = DomainEvent> = (
+export type DomainEventHandler<TEvent extends DomainEvent<unknown> = DomainEvent<unknown>> = (
   event: TEvent,
 ) => Promise<void>;
 
 export interface EventBus {
   subscribe(eventType: string, handler: DomainEventHandler): void;
-  publish(events: readonly DomainEvent[]): Promise<void>;
+  publish(events: readonly DomainEvent<unknown>[]): Promise<void>;
 }
 
 /**
@@ -22,7 +22,7 @@ export class InMemoryEventBus implements EventBus {
     this.handlers.set(eventType, existing);
   }
 
-  async publish(events: readonly DomainEvent[]): Promise<void> {
+  async publish(events: readonly DomainEvent<unknown>[]): Promise<void> {
     for (const event of events) {
       const subscribers = this.handlers.get(event.eventType) ?? [];
       for (const handler of subscribers) {

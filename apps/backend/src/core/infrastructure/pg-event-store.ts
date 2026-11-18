@@ -1,13 +1,23 @@
-import { AggregateMementoTable, DomainEventStoreTable, sqlInsert, sqlSelect } from '@foodapp/db';
-import type { Pool, PoolClient } from 'pg';
+import {
+  AggregateMementoTable,
+  DomainEventStoreTable,
+  type Pool,
+  type PoolClient,
+  sqlInsert,
+  sqlSelect,
+} from '@foodapp/db';
 import type { DomainEvent, EventMetadata } from '@/core/domain/domain-event';
 import type { Memento } from '@/core/domain/memento';
 
 export class PgEventStore {
-  constructor(private readonly pool: Pool) {}
+  private readonly pool: Pool;
+
+  constructor(pool: Pool) {
+    this.pool = pool;
+  }
 
   async appendEvents(
-    events: readonly DomainEvent[],
+    events: readonly DomainEvent<unknown>[],
     memento?: Memento<unknown>,
     externalClient?: PoolClient,
   ): Promise<void> {
@@ -68,7 +78,7 @@ export class PgEventStore {
   }
 
   async loadStream<TState>(aggregateId: string): Promise<{
-    events: DomainEvent[];
+    events: DomainEvent<unknown>[];
     memento?: Memento<TState>;
   }> {
     const mCols = AggregateMementoTable.cols;
