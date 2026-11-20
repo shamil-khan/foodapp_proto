@@ -46,6 +46,8 @@ _(See [`./_templates/tech-stack.md`](./_templates/tech-stack.md) for exact DI li
 | [`008-multi-branch-restaurants.md`](./008-multi-branch-restaurants.md)                                   | Multi-Branch Restaurants with Branch-Level PBAC & Menu Overrides      | **Proposed**               | Introduces Brand -> Branch hierarchy, geo-coordinates, and branch-specific pricing overrides                         |
 | [`009-fix-backend-typescript-build-errors.md`](./009-fix-backend-typescript-build-errors.md)             | Fix Backend TypeScript Build Errors & Enforce Strict Compilation      | **Implemented & Verified** | Resolved 381 TS7 `erasableSyntaxOnly` & `@inferdi/inferdi` v6.1.1 errors across `@foodapp/db` and `@foodapp/backend` |
 
+- [ADR-010: Automated API Smoke & Integration Testing Suite](./010-automated-api-smoke-testing.md) — **Implemented & Verified** (`vitest` ^5.1.1 automated HTTP smoke test suite targeting `TEST_BASE_URL` for CI/CD and post-deploy cloud verification)
+
 **- Multi-Region & Territorial Expansion (Planned):**
 
 - Initially launched with UK VAT rules (`StandardUkVatStrategy` / `ZeroRatedUkVatStrategy`), with a future ADR planned to introduce region-specific tax/VAT and territorial compliance workflows for US, Australia, and additional markets.

@@ -5,9 +5,10 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsx build src/index.ts",
-    "format": "biome format --write src",
-    "lint": "biome lint src",
-    "fixed": "biome check --write src"
+    "format": "biome format --write src tests",
+    "lint": "biome lint src tests",
+    "fixed": "biome check --write src tests",
+    "test:smoke": "vitest run --config vitest.config.ts"
   },
   "keywords": [],
   "author": "Shamil Khan",
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@types/node": "^26.6.6",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
   }
 }
