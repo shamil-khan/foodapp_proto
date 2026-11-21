@@ -1,6 +1,7 @@
 import {
   type Pool,
   RestaurantStaffTable,
+  StaffBranchAssignmentTable,
   StaffRolePermissionTable,
   StaffRoleTable,
   sqlInsert,
@@ -73,6 +74,9 @@ export class CreateStaffRoleHandler
       return err(new DomainError('INVALID_PERMISSIONS', 'At least one valid right is required.'));
     }
 
+    const delegateCheck = this.authz.assertCanDelegate(cleanPerms);
+    if (!delegateCheck.ok) return delegateCheck;
+
     const rCols = StaffRoleTable.cols;
     const dupCheck = sqlSelect(StaffRoleTable)
       .select([
@@ -86,11 +90,7 @@ export class CreateStaffRoleHandler
     const dupRes = await this.pool.query<typeof dupCheck._result>(dupCheck.text, dupCheck.params);
     if (dupRes.rows[0]) {
       return err(
-        new DomainError(
-          'ROLE_EXISTS',
-          `Role "${cleanName}" already exists in this restaurant.`,
-          409,
-        ),
+        new DomainError('ROLE_EXISTS', `Role "${cleanName}" already exists in this brand.`, 409),
       );
     }
 
@@ -200,11 +200,11 @@ export class UpdateStaffRoleHandler
     const access = this.authz.assertRestaurantAccess(role.restaurantId, 'staff:roles:manage');
     if (!access.ok) return access;
 
-    if (role.isSystemRole && role.name === 'OWNER') {
+    if (role.isSystemRole) {
       return err(
         new DomainError(
           'SYSTEM_ROLE_LOCKED',
-          'The primary OWNER role cannot be edited or have its rights revoked.',
+          'Predefined system roles are immutable and cannot be edited.',
           403,
         ),
       );
@@ -214,6 +214,9 @@ export class UpdateStaffRoleHandler
     if (cleanPerms.length === 0) {
       return err(new DomainError('INVALID_PERMISSIONS', 'At least one valid right is required.'));
     }
+
+    const delegateCheck = this.authz.assertCanDelegate(cleanPerms);
+    if (!delegateCheck.ok) return delegateCheck;
 
     const client = await this.pool.connect();
     try {
@@ -305,7 +308,6 @@ export class DeleteStaffRoleHandler
       .select([
         rCols.id,
         rCols.restaurantId,
-        rCols.name,
         rCols.isSystemRole,
       ])
       .whereEq(rCols.id, cmd.roleId)
@@ -324,18 +326,18 @@ export class DeleteStaffRoleHandler
     const access = this.authz.assertRestaurantAccess(role.restaurantId, 'staff:roles:manage');
     if (!access.ok) return access;
 
-    if (role.isSystemRole || role.name === 'OWNER') {
+    if (role.isSystemRole) {
       return err(
-        new DomainError('SYSTEM_ROLE_LOCKED', 'System-protected roles cannot be deleted.', 403),
+        new DomainError('SYSTEM_ROLE_LOCKED', 'Predefined system roles cannot be deleted.', 403),
       );
     }
 
-    const sCols = RestaurantStaffTable.cols;
-    const assignedQuery = sqlSelect(RestaurantStaffTable)
+    const aCols = StaffBranchAssignmentTable.cols;
+    const assignedQuery = sqlSelect(StaffBranchAssignmentTable)
       .select([
-        sCols.id,
+        aCols.id,
       ])
-      .whereEq(sCols.roleId, role.id)
+      .whereEq(aCols.staffRoleId, role.id)
       .activeOnly()
       .take(1)
       .compile();
@@ -348,7 +350,7 @@ export class DeleteStaffRoleHandler
       return err(
         new DomainError(
           'ROLE_IN_USE',
-          'Cannot delete role while active staff members are assigned to it.',
+          'Cannot delete role while active staff branch assignments use it.',
           409,
         ),
       );
@@ -361,27 +363,94 @@ export class DeleteStaffRoleHandler
   }
 }
 
-export interface AssignStaffRoleCommand extends Command<Result<void>> {
+export interface AssignStaffBranchAccessCommand extends Command<Result<void>> {
   readonly staffId: string;
+  readonly branchId: string;
   readonly roleId: string;
+  readonly directPermissions?: readonly TenantPermission[];
+  readonly isPrimary?: boolean;
 }
 
-export class AssignStaffRoleHandler
-  implements CommandHandler<AssignStaffRoleCommand, Result<void>>
+function mapRoleNameToLegacyEnum(roleName: string): TenantRole {
+  if (roleName === 'OWNER' || roleName === 'BRAND_OWNER') return 'OWNER';
+  if (roleName === 'OPERATIONAL_MANAGER') return 'ADMIN';
+  if (roleName === 'BRANCH_MANAGER') return 'MANAGER';
+  return 'ORDER_TAKER';
+}
+
+export class AssignStaffBranchAccessHandler
+  implements CommandHandler<AssignStaffBranchAccessCommand, Result<void>>
 {
   private readonly pool: Pool;
+  private readonly rolePermissionCache: RolePermissionCache;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
+  constructor(
+    pool: Pool,
+    rolePermissionCache: RolePermissionCache,
+    authz: AuthorizationPolicy,
+    request: RequestContext,
+  ) {
     this.pool = pool;
+    this.rolePermissionCache = rolePermissionCache;
     this.authz = authz;
     this.request = request;
   }
 
-  async execute(cmd: AssignStaffRoleCommand): Promise<Result<void>> {
+  private async upsertAssignment(params: {
+    staffId: string;
+    branchId: string;
+    roleId: string;
+    directPermissions: TenantPermission[];
+    isPrimary?: boolean;
+  }): Promise<void> {
+    const aCols = StaffBranchAssignmentTable.cols;
+    const exQ = sqlSelect(StaffBranchAssignmentTable)
+      .select([
+        aCols.id,
+      ])
+      .whereEq(aCols.staffId, params.staffId)
+      .whereEq(aCols.branchId, params.branchId)
+      .activeOnly()
+      .compile();
+    const existing = (await this.pool.query<typeof exQ._result>(exQ.text, exQ.params)).rows[0];
+
+    if (existing) {
+      const upd = sqlUpdate(StaffBranchAssignmentTable)
+        .set({
+          staffRoleId: params.roleId,
+          directPermissions: params.directPermissions,
+          isPrimary: params.isPrimary,
+        })
+        .withAuditBump(this.request.actorId)
+        .whereEq(aCols.id, existing.id)
+        .whereNull(aCols.deletedAt)
+        .compile();
+      await this.pool.query(upd.text, upd.params);
+      return;
+    }
+
+    const ins = sqlInsert(StaffBranchAssignmentTable)
+      .values({
+        staffId: params.staffId,
+        branchId: params.branchId,
+        staffRoleId: params.roleId,
+        directPermissions: params.directPermissions,
+        isPrimary: params.isPrimary ?? false,
+        createdBy: this.request.actorId,
+        updatedBy: this.request.actorId,
+      })
+      .compile();
+    await this.pool.query(ins.text, ins.params);
+  }
+
+  async execute(cmd: AssignStaffBranchAccessCommand): Promise<Result<void>> {
+    const access = this.authz.assertBranchAccess(cmd.branchId, 'staff:manage');
+    if (!access.ok) return access;
+
     const sCols = RestaurantStaffTable.cols;
-    const staffQuery = sqlSelect(RestaurantStaffTable)
+    const sQ = sqlSelect(RestaurantStaffTable)
       .select([
         sCols.id,
         sCols.restaurantId,
@@ -389,21 +458,12 @@ export class AssignStaffRoleHandler
       .whereEq(sCols.id, cmd.staffId)
       .activeOnly()
       .compile();
-
-    const staffRes = await this.pool.query<typeof staffQuery._result>(
-      staffQuery.text,
-      staffQuery.params,
-    );
-    const staff = staffRes.rows[0];
-    if (!staff) {
+    const staff = (await this.pool.query<typeof sQ._result>(sQ.text, sQ.params)).rows[0];
+    if (!staff)
       return err(new DomainError('STAFF_NOT_FOUND', `Staff member ${cmd.staffId} not found.`, 404));
-    }
-
-    const access = this.authz.assertRestaurantAccess(staff.restaurantId, 'staff:manage');
-    if (!access.ok) return access;
 
     const rCols = StaffRoleTable.cols;
-    const roleQuery = sqlSelect(StaffRoleTable)
+    const rQ = sqlSelect(StaffRoleTable)
       .select([
         rCols.id,
         rCols.restaurantId,
@@ -412,37 +472,41 @@ export class AssignStaffRoleHandler
       .whereEq(rCols.id, cmd.roleId)
       .activeOnly()
       .compile();
-
-    const roleRes = await this.pool.query<typeof roleQuery._result>(
-      roleQuery.text,
-      roleQuery.params,
-    );
-    const targetRole = roleRes.rows[0];
-    if (!targetRole || targetRole.restaurantId !== staff.restaurantId) {
+    const targetRole = (await this.pool.query<typeof rQ._result>(rQ.text, rQ.params)).rows[0];
+    if (targetRole?.restaurantId !== staff.restaurantId) {
       return err(
-        new DomainError('ROLE_NOT_FOUND', 'Target role does not exist in this restaurant.', 404),
+        new DomainError('ROLE_NOT_FOUND', 'Target role does not exist in this brand.', 404),
       );
     }
 
-    const mappedEnum: TenantRole =
-      targetRole.name === 'OWNER' ||
-      targetRole.name === 'ADMIN' ||
-      targetRole.name === 'MANAGER' ||
-      targetRole.name === 'ORDER_TAKER'
-        ? targetRole.name
-        : 'ORDER_TAKER';
+    const rolePerms = await this.rolePermissionCache.getPermissionsForRole(targetRole.id);
+    const cleanDirect = sanitizePermissions(cmd.directPermissions ?? []);
+    const delegateCheck = this.authz.assertCanDelegate([
+      ...rolePerms,
+      ...cleanDirect,
+    ]);
+    if (!delegateCheck.ok) return delegateCheck;
+
+    await this.upsertAssignment({
+      staffId: staff.id,
+      branchId: cmd.branchId,
+      roleId: targetRole.id,
+      directPermissions: cleanDirect,
+      isPrimary: cmd.isPrimary,
+    });
 
     const updateStaff = sqlUpdate(RestaurantStaffTable)
       .set({
         roleId: targetRole.id,
-        role: mappedEnum,
+        role: mapRoleNameToLegacyEnum(targetRole.name),
       })
       .withAuditBump(this.request.actorId)
       .whereEq(sCols.id, staff.id)
       .whereNull(sCols.deletedAt)
       .compile();
-
     await this.pool.query(updateStaff.text, updateStaff.params);
+
+    await this.rolePermissionCache.invalidateStaffBranch(staff.id, cmd.branchId);
     return ok(undefined);
   }
 }

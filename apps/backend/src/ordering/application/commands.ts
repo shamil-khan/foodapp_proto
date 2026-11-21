@@ -62,23 +62,16 @@ export class PlacePosOrderHandler
     this.request = request;
   }
 
-  async execute(cmd: PlacePosOrderCommand): Promise<
-    Result<{
-      orderId: string;
-      kdsTickets: KdsTicketOutput;
-    }>
-  > {
-    const access = this.authz.assertRestaurantAccess(cmd.restaurantId, 'orders:place');
-    if (!access.ok) {
-      return access;
-    }
-
+  private async hydrateLineSnapshots(
+    brandId: string,
+    items: PlacePosOrderCommand['items'],
+  ): Promise<Result<OrderLineSnapshot[], DomainError>> {
     const lineSnapshots: OrderLineSnapshot[] = [];
     const mCols = MenuItemTable.cols;
     const cCols = CategoryTable.cols;
     const modCols = ItemModifierTable.cols;
 
-    for (const item of cmd.items) {
+    for (const item of items) {
       const itemQuery = sqlSelect(MenuItemTable)
         .select([
           mCols.categoryId,
@@ -112,11 +105,11 @@ export class PlacePosOrderHandler
         .activeOnly()
         .compile();
       const catRes = await this.pool.query<typeof catQuery._result>(catQuery.text, catQuery.params);
-      if (catRes.rows[0]?.restaurantId !== cmd.restaurantId) {
+      if (catRes.rows[0]?.restaurantId !== brandId) {
         return err(
           new DomainError(
             'TENANT_FORBIDDEN',
-            `Menu item ${item.menuItemId} does not belong to target restaurant.`,
+            `Menu item ${item.menuItemId} does not belong to this brand.`,
             403,
           ),
         );
@@ -161,29 +154,54 @@ export class PlacePosOrderHandler
       });
     }
 
+    return ok(lineSnapshots);
+  }
+
+  async execute(cmd: PlacePosOrderCommand): Promise<
+    Result<{
+      orderId: string;
+      kdsTickets: KdsTicketOutput;
+    }>
+  > {
+    const brandId = this.request.restaurantId;
+    const branchId = this.request.branchId;
+    if (!brandId || !branchId) {
+      return err(new DomainError('MISSING_BRANCH', 'Active branch session required.', 403));
+    }
+
+    const access = this.authz.assertBranchAccess(branchId, 'orders:place');
+    if (!access.ok) {
+      return access;
+    }
+
+    const hydrated = await this.hydrateLineSnapshots(brandId, cmd.items);
+    if (!hydrated.ok) {
+      return hydrated;
+    }
+
     const orderId = crypto.randomUUID();
-    const orderResult = OrderAggregate.place(
+    const placeResult = OrderAggregate.place(
       orderId,
       {
-        restaurantId: cmd.restaurantId,
-        diningTableId: cmd.diningTableId,
+        restaurantId: branchId,
         customerId: cmd.customerId,
+        diningTableId: cmd.diningTableId,
         orderSource: cmd.orderSource,
-        items: lineSnapshots,
+        items: hydrated.value,
       },
       {
         requestId: this.request.requestId,
         actorId: this.request.actorId,
-        restaurantId: cmd.restaurantId,
+        restaurantId: branchId,
       },
     );
 
-    if (!orderResult.ok) {
-      return orderResult;
+    if (!placeResult.ok) {
+      return placeResult;
     }
 
-    await this.orderRepo.save(orderResult.value);
-    const kdsTickets = orderResult.value.accept(new KdsTicketVisitor()) as KdsTicketOutput;
+    await this.orderRepo.save(placeResult.value);
+    const kdsTickets = placeResult.value.accept(new KdsTicketVisitor()) as KdsTicketOutput;
 
     return ok({
       orderId,
@@ -215,7 +233,7 @@ export class SettlePosOrderHandler implements CommandHandler<SettlePosOrderComma
       return err(new DomainError('ORDER_NOT_FOUND', `Order ${cmd.orderId} not found.`, 404));
     }
 
-    const access = this.authz.assertRestaurantAccess(order.snapshot.restaurantId, 'orders:settle');
+    const access = this.authz.assertBranchAccess(order.snapshot.restaurantId, 'orders:settle');
     if (!access.ok) {
       return access;
     }

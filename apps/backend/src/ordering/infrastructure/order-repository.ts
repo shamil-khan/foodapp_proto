@@ -64,7 +64,7 @@ export class OrderRepository {
     const insertOrder = sqlInsert(OrderTable)
       .values({
         id: event.aggregateId,
-        restaurantId: p.restaurantId,
+        branchId: p.restaurantId,
         customerId: p.customerId ?? null,
         diningTableId: p.diningTableId ?? null,
         orderSource: p.orderSource,

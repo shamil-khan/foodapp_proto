@@ -3,29 +3,7 @@ CREATE FUNCTION pg_temp.seed_actor() RETURNS UUID LANGUAGE SQL IMMUTABLE AS $$
 $$;
 
 
--- 1. SEED 5 GLOBAL ADMINS
-INSERT INTO
-  "User" (
-    "email",
-    "name",
-    "emailVerified",
-    "role",
-    "createdBy",
-    "updatedBy"
-  )
-SELECT
-  'admin' || i || '@ukfoodpos.co.uk',
-  'UK Platform Admin ' || i,
-  TRUE,
-  'PLATFORM_ADMIN',
-  pg_temp.seed_actor()::UUID,
-  pg_temp.seed_actor()::UUID
-FROM
-  generate_series(1, 5) AS i
-ON CONFLICT ("email") DO NOTHING;
-
-
--- 2. SEED 10 GLOBAL CUSTOMERS
+-- 1. SEED PLATFORM ADMINS, CUSTOMERS & DRIVERS
 INSERT INTO
   "User" (
     "id",
@@ -37,6 +15,15 @@ INSERT INTO
     "updatedBy"
   )
 VALUES
+  (
+    '00000000-0000-4000-8000-000000000001',
+    'admin1@ukfoodpos.co.uk',
+    'Platform Admin 1',
+    TRUE,
+    'PLATFORM_ADMIN',
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
   (
     '11111111-1111-4111-8111-111111111111',
     'customer1@ukmail.co.uk',
@@ -45,47 +32,20 @@ VALUES
     'CUSTOMER',
     pg_temp.seed_actor(),
     pg_temp.seed_actor()
-  )
-ON CONFLICT ("email") DO NOTHING;
-
-
-INSERT INTO
-  "User" (
-    "email",
-    "name",
-    "emailVerified",
-    "role",
-    "createdBy",
-    "updatedBy"
-  )
-SELECT
-  'customer' || i || '@ukmail.co.uk',
-  'UK Customer ' || i,
-  TRUE,
-  'CUSTOMER',
-  pg_temp.seed_actor()::UUID,
-  pg_temp.seed_actor()::UUID
-FROM
-  generate_series(2, 10) AS i
-ON CONFLICT ("email") DO NOTHING;
-
-
--- 3. SEED 10 GLOBAL DRIVERS (Inactive for Showcase)
-INSERT INTO
-  "User" (
-    "id",
-    "email",
-    "name",
-    "emailVerified",
-    "role",
-    "createdBy",
-    "updatedBy"
-  )
-VALUES
+  ),
+  (
+    '11111111-1111-4111-8111-111111111112',
+    'customer2@ukmail.co.uk',
+    'Zara Khan',
+    TRUE,
+    'CUSTOMER',
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
   (
     '22222222-2222-4222-8222-222222222222',
     'rider1@ukfleet.co.uk',
-    'Harry Potter Rider',
+    'Harry Rider',
     TRUE,
     'DRIVER',
     pg_temp.seed_actor(),
@@ -111,41 +71,22 @@ VALUES
     '22222222-2222-4222-8222-222222222222',
     'UK-DVLA-001',
     'Electric Moped',
-    FALSE,
-    ARRAY['E1', 'SW1A'],
+    TRUE,
+    ARRAY['E1', 'KHI-PECHS', 'KHI-CLIFTON', 'LHR-GULBERG'],
     pg_temp.seed_actor(),
     pg_temp.seed_actor()
   )
 ON CONFLICT ("userId") DO NOTHING;
 
 
-INSERT INTO
-  "User" (
-    "email",
-    "name",
-    "emailVerified",
-    "role",
-    "createdBy",
-    "updatedBy"
-  )
-SELECT
-  'rider' || i || '@ukfleet.co.uk',
-  'Showcase Rider ' || i,
-  TRUE,
-  'DRIVER',
-  pg_temp.seed_actor()::UUID,
-  pg_temp.seed_actor()::UUID
-FROM
-  generate_series(2, 10) AS i
-ON CONFLICT ("email") DO NOTHING;
-
-
--- 4. SEED 10 UK RESTAURANTS WITH UNIQUE SUBDOMAINS (*.fapp.com)
+-- 2. SEED 5 ARCHETYPE BRANDS / CREATORS
 INSERT INTO
   "Restaurant" (
     "id",
     "name",
-    "subdomain",
+    "handle",
+    "logoUrl",
+    "description",
     "vatNumber",
     "companyHouseNumber",
     "foodHygieneRating",
@@ -159,54 +100,30 @@ INSERT INTO
 VALUES
   (
     'a0000000-0000-4000-8000-000000000001',
-    'Smash 360 London',
-    'smash360',
-    'GB100012345',
-    '08005432',
+    'Ayesha''s Kitchen',
+    'ayeshas-kitchen',
+    'https://foodapp.example',
+    'Authentic homemade biryani and nihari prepared fresh daily in small batches.',
+    NULL,
+    NULL,
     5,
-    'E1',
-    11,
+    'KHI-PECHS',
+    25,
     'WEEKLY',
-    12.50,
+    10.00,
     pg_temp.seed_actor(),
     pg_temp.seed_actor()
   ),
   (
     'a0000000-0000-4000-8000-000000000002',
-    'Westminster Patty Co',
-    'westminster-patty',
+    'BiteIn',
+    'bitein',
+    'https://foodapp.example',
+    'Neighborhood artisan smash burgers, loaded fries, and thick shakes.',
     'GB100024690',
     '08010864',
     5,
     'SW1A',
-    12,
-    'DAILY',
-    12.50,
-    pg_temp.seed_actor(),
-    pg_temp.seed_actor()
-  ),
-  (
-    'a0000000-0000-4000-8000-000000000003',
-    'Manchester Smash',
-    'manchester-smash',
-    'GB100037035',
-    '08016296',
-    5,
-    'M1',
-    13,
-    'WEEKLY',
-    12.50,
-    pg_temp.seed_actor(),
-    pg_temp.seed_actor()
-  ),
-  (
-    'a0000000-0000-4000-8000-000000000004',
-    'Brum Burger Lab',
-    'brum-burger',
-    'GB100049380',
-    '08021728',
-    5,
-    'B1',
     14,
     'DAILY',
     12.50,
@@ -214,109 +131,113 @@ VALUES
     pg_temp.seed_actor()
   ),
   (
-    'a0000000-0000-4000-8000-000000000005',
-    'Leeds Grill 360',
-    'leeds-grill',
-    'GB100061725',
-    '08027160',
+    'a0000000-0000-4000-8000-000000000003',
+    'BurgerLab Cloud',
+    'burgerlab-cloud',
+    'https://foodapp.example',
+    'Delivery-first cloud kitchen crafting double-seared burgers and hot wings.',
+    'PK-NTN-778899',
+    NULL,
     5,
-    'LS1',
-    15,
-    'WEEKLY',
-    12.50,
-    pg_temp.seed_actor(),
-    pg_temp.seed_actor()
-  ),
-  (
-    'a0000000-0000-4000-8000-000000000006',
-    'Glasgow Melt',
-    'glasgow-melt',
-    'GB100074070',
-    '08032592',
-    5,
-    'G1',
-    16,
-    'DAILY',
-    12.50,
-    pg_temp.seed_actor(),
-    pg_temp.seed_actor()
-  ),
-  (
-    'a0000000-0000-4000-8000-000000000007',
-    'Edinburgh Stack',
-    'edinburgh-stack',
-    'GB100086415',
-    '08038024',
-    5,
-    'EH1',
-    17,
-    'WEEKLY',
-    12.50,
-    pg_temp.seed_actor(),
-    pg_temp.seed_actor()
-  ),
-  (
-    'a0000000-0000-4000-8000-000000000008',
-    'Cardiff Brioche',
-    'cardiff-brioche',
-    'GB100098760',
-    '08043456',
-    5,
-    'CF10',
-    10,
-    'DAILY',
-    12.50,
-    pg_temp.seed_actor(),
-    pg_temp.seed_actor()
-  ),
-  (
-    'a0000000-0000-4000-8000-000000000009',
-    'Bristol Bun House',
-    'bristol-bun',
-    'GB100111105',
-    '08048888',
-    5,
-    'BS1',
-    11,
-    'WEEKLY',
-    12.50,
-    pg_temp.seed_actor(),
-    pg_temp.seed_actor()
-  ),
-  (
-    'a0000000-0000-4000-8000-000000000010',
-    'Liverpool Smash',
-    'liverpool-smash',
-    'GB100123450',
-    '08054320',
-    5,
-    'L1',
+    'KHI-DHA',
     12,
     'DAILY',
+    14.00,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'a0000000-0000-4000-8000-000000000004',
+    'PizzaIn',
+    'pizzain',
+    'https://foodapp.example',
+    'Karachi''s favorite wood-fired and pan pizza chain across Clifton and Gulshan.',
+    'PK-NTN-445566',
+    'SECP-00912',
+    5,
+    'KHI-CLIFTON',
+    18,
+    'WEEKLY',
     12.50,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'a0000000-0000-4000-8000-000000000005',
+    'Pizza Hut',
+    'pizza-hut',
+    'https://foodapp.example',
+    'Pan pizzas, stuffed crusts, and pasta combos across Karachi and Lahore.',
+    'PK-NTN-112233',
+    'SECP-00101',
+    5,
+    'KHI-CLIFTON',
+    20,
+    'DAILY',
+    11.00,
     pg_temp.seed_actor(),
     pg_temp.seed_actor()
   )
 ON CONFLICT ("id") DO NOTHING;
 
 
--- 5. SEED LAYOUTS & PAYMENT CONFIGS FOR ALL 10 RESTAURANTS
+-- 3. SEED BRAND STOREFRONT LAYOUTS, PAYMENT CONFIGS & DEFAULT PRICING POLICIES
 INSERT INTO
   "RestaurantLayout" (
     "restaurantId",
     "templateId",
     "primaryColor",
+    "bannerUrl",
+    "galleryImages",
     "createdBy",
     "updatedBy"
   )
-SELECT
-  "id",
-  'uk_pos_modern_v1',
-  '#1E293B',
-  pg_temp.seed_actor()::UUID,
-  pg_temp.seed_actor()::UUID
-FROM
-  "Restaurant"
+VALUES
+  (
+    'a0000000-0000-4000-8000-000000000001',
+    'home_creator_warm_v1',
+    '#B45309',
+    'https://foodapp.example',
+    '["https://foodapp.example"]'::JSONB,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'a0000000-0000-4000-8000-000000000002',
+    'uk_pos_modern_v1',
+    '#1E293B',
+    'https://foodapp.example',
+    '[]'::JSONB,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'a0000000-0000-4000-8000-000000000003',
+    'cloud_kitchen_dark_v1',
+    '#0F172A',
+    'https://foodapp.example',
+    '[]'::JSONB,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'a0000000-0000-4000-8000-000000000004',
+    'chain_flagship_v1',
+    '#DC2626',
+    'https://foodapp.example',
+    '[]'::JSONB,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'a0000000-0000-4000-8000-000000000005',
+    'enterprise_chain_v1',
+    '#B91C1C',
+    'https://foodapp.example',
+    '[]'::JSONB,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  )
 ON CONFLICT ("restaurantId") DO NOTHING;
 
 
@@ -331,7 +252,7 @@ INSERT INTO
 SELECT
   "id",
   'INSTANT_SPLIT',
-  'acct_uk_stripe_' || right("id"::TEXT, 4),
+  'acct_foodapp_' || right("id"::TEXT, 4),
   pg_temp.seed_actor()::UUID,
   pg_temp.seed_actor()::UUID
 FROM
@@ -339,7 +260,359 @@ FROM
 ON CONFLICT ("restaurantId") DO NOTHING;
 
 
--- 5B. SEED DEFAULT STAFF ROLES & RIGHTS FOR ALL 10 RESTAURANTS
+INSERT INTO
+  "PricingPolicy" (
+    "restaurantId",
+    "branchId",
+    "menuPricingMode",
+    "maxDirectPriceDeltaPercent",
+    "allowBranchLocalItems",
+    "maxDirectOrderDiscountPercent",
+    "allowFullCompWaiveOff",
+    "requireReasonForCompOrDiscount",
+    "maxDirectRefundAmount",
+    "createdBy",
+    "updatedBy"
+  )
+VALUES
+  (
+    'a0000000-0000-4000-8000-000000000001',
+    NULL,
+    'BRANCH_DIRECT',
+    25.00,
+    TRUE,
+    20.00,
+    TRUE,
+    TRUE,
+    30.00,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'a0000000-0000-4000-8000-000000000002',
+    NULL,
+    'BRANCH_DIRECT',
+    15.00,
+    TRUE,
+    15.00,
+    TRUE,
+    TRUE,
+    40.00,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'a0000000-0000-4000-8000-000000000003',
+    NULL,
+    'CENTRAL_LOCKED',
+    0.00,
+    FALSE,
+    10.00,
+    FALSE,
+    TRUE,
+    25.00,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'a0000000-0000-4000-8000-000000000004',
+    NULL,
+    'THRESHOLD_HYBRID',
+    10.00,
+    TRUE,
+    20.00,
+    TRUE,
+    TRUE,
+    50.00,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'a0000000-0000-4000-8000-000000000005',
+    NULL,
+    'BRANCH_APPROVAL_REQUIRED',
+    0.00,
+    FALSE,
+    15.00,
+    TRUE,
+    TRUE,
+    50.00,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  );
+
+-- 4. SEED 8 PHYSICAL BRANCHES COVERING ALL 5 REAL-WORLD ARCHETYPES
+INSERT INTO
+  "RestaurantBranch" (
+    "id",
+    "restaurantId",
+    "name",
+    "branchKey",
+    "city",
+    "cityKey",
+    "kitchenType",
+    "postcodeSector",
+    "streetAddress",
+    "areaLocality",
+    "latitude",
+    "longitude",
+    "contactPersonName",
+    "contactPersonPhone",
+    "contactPersonEmail",
+    "supportsDineIn",
+    "supportsTakeaway",
+    "supportsPlatformDelivery",
+    "operationalStatus",
+    "scheduleConfig",
+    "homePickupPrivacyMode",
+    "dropPointConfig",
+    "approvedTakeawayUserIds",
+    "menuSelectionMode",
+    "averagePrepTimeMinutes",
+    "createdBy",
+    "updatedBy"
+  )
+VALUES
+  -- Archetype 1: Ayesha's Kitchen (HOME_KITCHEN in Karachi PECHS with public dropPointConfig + takeaway enabled)
+  (
+    'b0000000-0000-4000-8000-000000000001',
+    'a0000000-0000-4000-8000-000000000001',
+    'Ayesha''s Home Kitchen (PECHS)',
+    'pechs',
+    'Karachi',
+    'karachi',
+    'HOME_KITCHEN',
+    'KHI-PECHS',
+    'House 42-B, Block 6, PECHS, Karachi',
+    'PECHS Block 6',
+    24.860700,
+    67.064200,
+    'Ayesha Siddiqui',
+    '+92-300-8211001',
+    'ayesha@homekitchen.pk',
+    FALSE,
+    TRUE,
+    TRUE,
+    'OPEN',
+    '{"weekly":{"mon":["12:00-15:00","19:00-22:00"],"wed":["12:00-15:00","19:00-22:00"],"fri":["13:00-22:00"],"sat":["13:00-22:00"]},"overrides":[]}'::JSONB,
+    'ORDER_ACCEPTANCE',
+    '{"label":"Tariq Road Chase Up Main Gate Pickup Point","areaLocality":"PECHS Block 2","instructions":"Call 5 mins prior; rider/host hands over sealed bag at Gate 1.","latitude":24.8712,"longitude":67.0615}'::JSONB,
+    '[{"userId":"11111111-1111-4111-8111-111111111111","status":"APPROVED"}]'::JSONB,
+    'ALL_BRAND_ITEMS',
+    25,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  -- Archetype 2: BiteIn (Single-Location Commercial RESTAURANT_BRANCH in London Westminster)
+  (
+    'b0000000-0000-4000-8000-000000000002',
+    'a0000000-0000-4000-8000-000000000002',
+    'BiteIn Westminster',
+    'westminster',
+    'London',
+    'london',
+    'RESTAURANT_BRANCH',
+    'SW1A',
+    '18 Victoria Street, Westminster, London SW1A 0NZ',
+    'Westminster',
+    51.497500,
+    -0.135700,
+    'Callum Reid',
+    '+44-20-7946-0192',
+    'westminster@bitein.co.uk',
+    TRUE,
+    TRUE,
+    TRUE,
+    'OPEN',
+    '{"weekly":{"mon":["11:00-23:00"],"tue":["11:00-23:00"],"wed":["11:00-23:00"],"thu":["11:00-23:30"],"fri":["11:00-00:00"],"sat":["11:00-00:00"],"sun":["12:00-22:00"]},"overrides":[]}'::JSONB,
+    'ORDER_ACCEPTANCE',
+    NULL,
+    '[]'::JSONB,
+    'ALL_BRAND_ITEMS',
+    14,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  -- Archetype 3: BurgerLab Cloud (CLOUD_KITCHEN in Karachi DHA Phase 6 — no dine-in)
+  (
+    'b0000000-0000-4000-8000-000000000003',
+    'a0000000-0000-4000-8000-000000000003',
+    'BurgerLab Cloud DHA',
+    'dha-phase-6',
+    'Karachi',
+    'karachi',
+    'CLOUD_KITCHEN',
+    'KHI-DHA',
+    'Plot 14-C, Bukhari Commercial Lane 4, DHA Phase 6, Karachi',
+    'DHA Phase 6',
+    24.793700,
+    67.064900,
+    'Bilal Ahmed',
+    '+92-321-8222003',
+    'dha@burgerlabcloud.pk',
+    FALSE,
+    TRUE,
+    TRUE,
+    'OPEN',
+    '{"weekly":{"mon":["12:00-02:00"],"tue":["12:00-02:00"],"wed":["12:00-02:00"],"thu":["12:00-02:00"],"fri":["12:00-03:00"],"sat":["12:00-03:00"],"sun":["12:00-02:00"]},"overrides":[]}'::JSONB,
+    'ORDER_ACCEPTANCE',
+    NULL,
+    '[]'::JSONB,
+    'ALL_BRAND_ITEMS',
+    12,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  -- Archetype 4: PizzaIn (Single-City Multi-Branch in Karachi: Clifton Flagship + Gulshan Suburb Opt-In)
+  (
+    'b0000000-0000-4000-8000-000000000004',
+    'a0000000-0000-4000-8000-000000000004',
+    'PizzaIn Clifton',
+    'clifton',
+    'Karachi',
+    'karachi',
+    'RESTAURANT_BRANCH',
+    'KHI-CLIFTON',
+    '26th Street, Block 4 Clifton, Karachi',
+    'Clifton Block 4',
+    24.813800,
+    67.030000,
+    'Kamran Malik',
+    '+92-300-8233004',
+    'clifton@pizzain.pk',
+    TRUE,
+    TRUE,
+    TRUE,
+    'OPEN',
+    '{"weekly":{"mon":["12:00-00:00"],"tue":["12:00-00:00"],"wed":["12:00-00:00"],"thu":["12:00-00:00"],"fri":["12:00-01:00"],"sat":["12:00-01:00"],"sun":["12:00-00:00"]},"overrides":[]}'::JSONB,
+    'ORDER_ACCEPTANCE',
+    NULL,
+    '[]'::JSONB,
+    'ALL_BRAND_ITEMS',
+    18,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'b0000000-0000-4000-8000-000000000005',
+    'a0000000-0000-4000-8000-000000000004',
+    'PizzaIn Gulshan-e-Iqbal',
+    'gulshan-e-iqbal',
+    'Karachi',
+    'karachi',
+    'RESTAURANT_BRANCH',
+    'KHI-GULSHAN',
+    'Main University Road, Block 13-D, Gulshan-e-Iqbal, Karachi',
+    'Gulshan-e-Iqbal',
+    24.918000,
+    67.097100,
+    'Sana Tariq',
+    '+92-300-8233005',
+    'gulshan@pizzain.pk',
+    TRUE,
+    TRUE,
+    TRUE,
+    'OPEN',
+    '{"weekly":{"mon":["12:00-23:30"],"tue":["12:00-23:30"],"wed":["12:00-23:30"],"thu":["12:00-23:30"],"fri":["12:00-00:30"],"sat":["12:00-00:30"],"sun":["12:00-23:30"]},"overrides":[]}'::JSONB,
+    'ORDER_ACCEPTANCE',
+    NULL,
+    '[]'::JSONB,
+    'SELECTED_ITEMS_ONLY',
+    16,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  -- Archetype 5: Pizza Hut (Multi-City Multi-Branch across Karachi & Lahore)
+  (
+    'b0000000-0000-4000-8000-000000000006',
+    'a0000000-0000-4000-8000-000000000005',
+    'Pizza Hut Clifton',
+    'clifton',
+    'Karachi',
+    'karachi',
+    'RESTAURANT_BRANCH',
+    'KHI-CLIFTON',
+    'Boat Basin Food Street, Clifton Block 5, Karachi',
+    'Clifton Block 5',
+    24.822500,
+    67.028100,
+    'Usman Farooq',
+    '+92-300-8244006',
+    'khi.clifton@pizzahut.pk',
+    TRUE,
+    TRUE,
+    TRUE,
+    'OPEN',
+    '{"weekly":{"mon":["12:00-00:00"],"tue":["12:00-00:00"],"wed":["12:00-00:00"],"thu":["12:00-00:00"],"fri":["12:00-01:00"],"sat":["12:00-01:00"],"sun":["12:00-00:00"]},"overrides":[]}'::JSONB,
+    'ORDER_ACCEPTANCE',
+    NULL,
+    '[]'::JSONB,
+    'ALL_BRAND_ITEMS',
+    20,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'b0000000-0000-4000-8000-000000000007',
+    'a0000000-0000-4000-8000-000000000005',
+    'Pizza Hut Gulberg',
+    'gulberg',
+    'Lahore',
+    'lahore',
+    'RESTAURANT_BRANCH',
+    'LHR-GULBERG',
+    'MM Alam Road, Block C-2, Gulberg III, Lahore',
+    'Gulberg III',
+    31.510200,
+    74.344100,
+    'Hamza Sheikh',
+    '+92-300-8244007',
+    'lhr.gulberg@pizzahut.pk',
+    TRUE,
+    TRUE,
+    TRUE,
+    'OPEN',
+    '{"weekly":{"mon":["12:00-00:00"],"tue":["12:00-00:00"],"wed":["12:00-00:00"],"thu":["12:00-00:00"],"fri":["12:00-01:00"],"sat":["12:00-01:00"],"sun":["12:00-00:00"]},"overrides":[]}'::JSONB,
+    'ORDER_ACCEPTANCE',
+    NULL,
+    '[]'::JSONB,
+    'ALL_BRAND_ITEMS',
+    20,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'b0000000-0000-4000-8000-000000000008',
+    'a0000000-0000-4000-8000-000000000005',
+    'Pizza Hut DHA Lahore',
+    'dha-phase-5',
+    'Lahore',
+    'lahore',
+    'RESTAURANT_BRANCH',
+    'LHR-DHA',
+    'Sector CCA, Phase 5 DHA, Lahore',
+    'DHA Phase 5',
+    31.467600,
+    74.408300,
+    'Nadia Qureshi',
+    '+92-300-8244008',
+    'lhr.dha@pizzahut.pk',
+    TRUE,
+    TRUE,
+    TRUE,
+    'OPEN',
+    '{"weekly":{"mon":["12:00-00:00"],"tue":["12:00-00:00"],"wed":["12:00-00:00"],"thu":["12:00-00:00"],"fri":["12:00-01:00"],"sat":["12:00-01:00"],"sun":["12:00-00:00"]},"overrides":[]}'::JSONB,
+    'ORDER_ACCEPTANCE',
+    NULL,
+    '[]'::JSONB,
+    'SELECTED_ITEMS_ONLY',
+    18,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  )
+ON CONFLICT ("id") DO NOTHING;
+
+-- 5. SEED PREDEFINED SYSTEM ROLES & PERMISSIONS PER BRAND
 INSERT INTO
   "StaffRole" (
     "restaurantId",
@@ -353,7 +626,7 @@ SELECT
   r."id",
   role_def.role_name,
   role_def.role_desc,
-  role_def.is_sys,
+  TRUE,
   pg_temp.seed_actor()::UUID,
   pg_temp.seed_actor()::UUID
 FROM
@@ -361,26 +634,22 @@ FROM
   CROSS JOIN (
     VALUES
       (
-        'OWNER',
-        'Full restaurant ownership, ledger, staff & role administration',
-        TRUE
+        'BRAND_OWNER',
+        'Multi-branch brand owner with unrestricted brand & branch governance'
       ),
       (
-        'ADMIN',
-        'Restaurant administrator with full operational and role rights',
-        FALSE
+        'OPERATIONAL_MANAGER',
+        'Multi-branch operational manager across assigned branches'
       ),
       (
-        'MANAGER',
-        'Floor manager with catalog pricing, ordering, and settlement rights',
-        FALSE
+        'BRANCH_MANAGER',
+        'Branch manager handling daily floor operations, pricing proposals, and staff'
       ),
       (
-        'ORDER_TAKER',
-        'Front-of-house POS cashier with order placement and viewing rights',
-        FALSE
+        'CASHIER',
+        'Front-of-house cashier for order taking and bill settlement'
       )
-  ) AS role_def (role_name, role_desc, is_sys)
+  ) AS role_def (role_name, role_desc)
 ON CONFLICT DO NOTHING;
 
 
@@ -400,61 +669,63 @@ FROM
   "StaffRole" sr
   JOIN (
     VALUES
-      ('OWNER', 'catalog:price:update'),
-      ('OWNER', 'orders:read'),
-      ('OWNER', 'orders:place'),
-      ('OWNER', 'orders:settle'),
-      ('OWNER', 'ledger:read'),
-      ('OWNER', 'staff:roles:manage'),
-      ('OWNER', 'staff:manage'),
-      ('ADMIN', 'catalog:price:update'),
-      ('ADMIN', 'orders:read'),
-      ('ADMIN', 'orders:place'),
-      ('ADMIN', 'orders:settle'),
-      ('ADMIN', 'ledger:read'),
-      ('ADMIN', 'staff:roles:manage'),
-      ('ADMIN', 'staff:manage'),
-      ('MANAGER', 'catalog:price:update'),
-      ('MANAGER', 'orders:read'),
-      ('MANAGER', 'orders:place'),
-      ('MANAGER', 'orders:settle'),
-      ('ORDER_TAKER', 'orders:read'),
-      ('ORDER_TAKER', 'orders:place')
+      ('BRAND_OWNER', 'brand:branches:create'),
+      ('BRAND_OWNER', 'branch:settings:manage'),
+      ('BRAND_OWNER', 'branch:status:manage'),
+      ('BRAND_OWNER', 'branch:whitelist:manage'),
+      ('BRAND_OWNER', 'catalog:items:manage'),
+      ('BRAND_OWNER', 'catalog:price:update'),
+      ('BRAND_OWNER', 'catalog:price:approve'),
+      ('BRAND_OWNER', 'pricing:policy:manage'),
+      ('BRAND_OWNER', 'orders:read'),
+      ('BRAND_OWNER', 'orders:place'),
+      ('BRAND_OWNER', 'orders:settle'),
+      ('BRAND_OWNER', 'orders:discount:apply'),
+      ('BRAND_OWNER', 'orders:comp:waive'),
+      ('BRAND_OWNER', 'orders:refund'),
+      ('BRAND_OWNER', 'ledger:read'),
+      ('BRAND_OWNER', 'staff:roles:manage'),
+      ('BRAND_OWNER', 'staff:manage'),
+      ('OPERATIONAL_MANAGER', 'brand:branches:create'),
+      ('OPERATIONAL_MANAGER', 'branch:settings:manage'),
+      ('OPERATIONAL_MANAGER', 'branch:status:manage'),
+      ('OPERATIONAL_MANAGER', 'branch:whitelist:manage'),
+      ('OPERATIONAL_MANAGER', 'catalog:items:manage'),
+      ('OPERATIONAL_MANAGER', 'catalog:price:update'),
+      ('OPERATIONAL_MANAGER', 'catalog:price:approve'),
+      ('OPERATIONAL_MANAGER', 'orders:read'),
+      ('OPERATIONAL_MANAGER', 'orders:place'),
+      ('OPERATIONAL_MANAGER', 'orders:settle'),
+      ('OPERATIONAL_MANAGER', 'orders:discount:apply'),
+      ('OPERATIONAL_MANAGER', 'orders:comp:waive'),
+      ('OPERATIONAL_MANAGER', 'orders:refund'),
+      ('OPERATIONAL_MANAGER', 'ledger:read'),
+      ('OPERATIONAL_MANAGER', 'staff:roles:manage'),
+      ('OPERATIONAL_MANAGER', 'staff:manage'),
+      ('BRANCH_MANAGER', 'branch:settings:manage'),
+      ('BRANCH_MANAGER', 'branch:status:manage'),
+      ('BRANCH_MANAGER', 'branch:whitelist:manage'),
+      ('BRANCH_MANAGER', 'catalog:items:manage'),
+      ('BRANCH_MANAGER', 'catalog:price:update'),
+      ('BRANCH_MANAGER', 'orders:read'),
+      ('BRANCH_MANAGER', 'orders:place'),
+      ('BRANCH_MANAGER', 'orders:settle'),
+      ('BRANCH_MANAGER', 'orders:discount:apply'),
+      ('BRANCH_MANAGER', 'orders:comp:waive'),
+      ('BRANCH_MANAGER', 'orders:refund'),
+      ('BRANCH_MANAGER', 'staff:roles:manage'),
+      ('BRANCH_MANAGER', 'staff:manage'),
+      ('CASHIER', 'orders:read'),
+      ('CASHIER', 'orders:place'),
+      ('CASHIER', 'orders:settle')
   ) AS perm_def (role_name, permission) ON sr."name" = perm_def.role_name
 ON CONFLICT DO NOTHING;
 
 
--- 6. SEED 5 PHYSICAL DINING TABLES PER RESTAURANT (50 TOTAL)
-INSERT INTO
-  "DiningTable" (
-    "restaurantId",
-    "tableNumber",
-    "zoneName",
-    "seatCapacity",
-    "activeQrSessionToken",
-    "createdBy",
-    "updatedBy"
-  )
-SELECT
-  r."id",
-  'T-' || t_idx,
-  CASE
-    WHEN t_idx > 3 THEN 'Window Booth'
-    ELSE 'Main Floor'
-  END,
-  4,
-  'qr_tok_' || right(r."id"::TEXT, 4) || '_' || t_idx,
-  pg_temp.seed_actor()::UUID,
-  pg_temp.seed_actor()::UUID
-FROM
-  "Restaurant" r
-  CROSS JOIN generate_series(1, 5) AS t_idx
-ON CONFLICT ("activeQrSessionToken") DO NOTHING;
-
-
--- 7. SEED 10 ISOLATED STAFF MEMBERS PER RESTAURANT LINKED TO ROLE ID (100 TOTAL)
+-- 6. SEED BRAND-LEVEL STAFF & MULTI-BRANCH ASSIGNMENTS
 INSERT INTO
   "RestaurantStaff" (
+    "id",
     "restaurantId",
     "email",
     "passwordHash",
@@ -465,371 +736,236 @@ INSERT INTO
     "updatedBy"
   )
 SELECT
+  ('c0000000-0000-4000-8000-00000000000' || right(r."id"::TEXT, 1))::UUID,
   r."id",
-  'staff' || s.idx || '.' || right(r."id"::TEXT, 4) || '@pos-tenant.co.uk',
+  'owner@' || r."handle" || '.example.com',
   '$2b$10$MockHashedPasswordStringForTenantStaff',
-  'Staff ' || s.idx || ' (' || r."name" || ')',
-  s.role_name::"TenantRole",
+  r."name" || ' Owner',
+  'OWNER'::"TenantRole",
   sr."id",
-  pg_temp.seed_actor()::UUID,
-  pg_temp.seed_actor()::UUID
+  pg_temp.seed_actor(),
+  pg_temp.seed_actor()
 FROM
   "Restaurant" r
-  CROSS JOIN (
-    VALUES
-      (1, 'OWNER'),
-      (2, 'ADMIN'),
-      (3, 'MANAGER'),
-      (4, 'MANAGER'),
-      (5, 'ORDER_TAKER'),
-      (6, 'ORDER_TAKER'),
-      (7, 'ORDER_TAKER'),
-      (8, 'ORDER_TAKER'),
-      (9, 'ORDER_TAKER'),
-      (10, 'ORDER_TAKER')
-  ) AS s (idx, role_name)
   JOIN "StaffRole" sr ON sr."restaurantId" = r."id"
-  AND sr."name" = s.role_name
+  AND sr."name" = 'BRAND_OWNER'
 ON CONFLICT ("email") DO NOTHING;
 
 
--- 8. SEED CATEGORIES, SMASH BURGER MENU ITEMS & MODIFIERS
+INSERT INTO
+  "StaffBranchAssignment" (
+    "staffId",
+    "branchId",
+    "staffRoleId",
+    "directPermissions",
+    "isPrimary",
+    "createdBy",
+    "updatedBy"
+  )
+SELECT
+  rs."id",
+  rb."id",
+  rs."roleId",
+  '{}'::TEXT[],
+  (rb."id" = (
+    SELECT min(b2."id"::TEXT)::UUID
+    FROM "RestaurantBranch" b2
+    WHERE b2."restaurantId" = rb."restaurantId"
+  )),
+  pg_temp.seed_actor(),
+  pg_temp.seed_actor()
+FROM
+  "RestaurantStaff" rs
+  JOIN "RestaurantBranch" rb ON rb."restaurantId" = rs."restaurantId"
+ON CONFLICT DO NOTHING;
+
+
+-- 7. SEED CATEGORIES, MENU ITEMS WITH INGREDIENT HASHTAGS & BRANCH MENU OVERRIDES
 INSERT INTO
   "Category" (
+    "id",
     "restaurantId",
     "name",
     "sortWeight",
     "createdBy",
     "updatedBy"
   )
-SELECT
-  r."id",
-  c.cat_name,
-  c.weight,
-  pg_temp.seed_actor()::UUID,
-  pg_temp.seed_actor()::UUID
-FROM
-  "Restaurant" r
-  CROSS JOIN (
-    VALUES
-      ('Smash Burgers', 10),
-      ('Loaded Wraps', 20),
-      ('Thick Shakes', 30)
-  ) AS c (cat_name, weight);
+VALUES
+  (
+    'd0000000-0000-4000-8000-000000000001',
+    'a0000000-0000-4000-8000-000000000001',
+    'Homemade Classics',
+    10,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'd0000000-0000-4000-8000-000000000002',
+    'a0000000-0000-4000-8000-000000000002',
+    'Smash Burgers',
+    10,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'd0000000-0000-4000-8000-000000000003',
+    'a0000000-0000-4000-8000-000000000003',
+    'Cloud Burgers',
+    10,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'd0000000-0000-4000-8000-000000000004',
+    'a0000000-0000-4000-8000-000000000004',
+    'Signature Pizzas',
+    10,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  ),
+  (
+    'd0000000-0000-4000-8000-000000000005',
+    'a0000000-0000-4000-8000-000000000005',
+    'Pan & Stuffed Crust Pizzas',
+    10,
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
+  )
+ON CONFLICT ("id") DO NOTHING;
 
 
 INSERT INTO
   "MenuItem" (
+    "id",
     "categoryId",
+    "branchId",
     "name",
     "description",
     "basePrice",
     "vatRate",
     "allergenFlags",
+    "ingredientTags",
     "kdsTarget",
     "createdBy",
     "updatedBy"
   )
-SELECT
-  c."id",
-  CASE c."name"
-    WHEN 'Smash Burgers' THEN 'The Light One (' || r."postcodeSector" || ')'
-    WHEN 'Loaded Wraps' THEN 'Crispy Peri Wrap (' || r."postcodeSector" || ')'
-    ELSE 'Lotus Biscoff Shake (' || r."postcodeSector" || ')'
-  END,
-  CASE c."name"
-    WHEN 'Smash Burgers' THEN '1 Aged Beef Patty, American Cheese, Pickles, House Sauce'
-    WHEN 'Loaded Wraps' THEN 'Southern Fried Chicken, Peri Mayo, Iceberg, Brioche Tortilla'
-    ELSE 'Jersey Milk, Biscoff Spread, Crushed Biscuit, Whipped Cream'
-  END,
-  CASE c."name"
-    WHEN 'Smash Burgers' THEN 8.99
-    WHEN 'Loaded Wraps' THEN 9.49
-    ELSE 5.99
-  END,
-  20.00,
-  CASE c."name"
-    WHEN 'Smash Burgers' THEN ARRAY['Gluten', 'Dairy', 'Mustard']
-    WHEN 'Loaded Wraps' THEN ARRAY['Gluten', 'Eggs']
-    ELSE ARRAY['Dairy', 'Gluten', 'Soya']
-  END,
-  CASE c."name"
-    WHEN 'Thick Shakes' THEN 'BAR_PRINTER'::"KdsRoutingTarget"
-    ELSE 'KITCHEN_SCREEN'::"KdsRoutingTarget"
-  END,
-  pg_temp.seed_actor()::UUID,
-  pg_temp.seed_actor()::UUID
-FROM
-  "Category" c
-  JOIN "Restaurant" r ON r."id" = c."restaurantId";
-
-
-INSERT INTO
-  "ItemModifier" (
-    "menuItemId",
-    "name",
-    "extraPrice",
-    "createdBy",
-    "updatedBy"
-  )
-SELECT
-  m."id",
-  mod.mod_name,
-  mod.price,
-  pg_temp.seed_actor()::UUID,
-  pg_temp.seed_actor()::UUID
-FROM
-  "MenuItem" m
-  JOIN "Category" c ON c."id" = m."categoryId"
-  CROSS JOIN (
-    VALUES
-      ('Add Extra Smash Patty', 2.99),
-      ('Extra Monterey Jack Cheese', 0.75),
-      ('Turkey Bacon Rashers', 1.25)
-  ) AS mod(mod_name, price)
-WHERE
-  c."name" = 'Smash Burgers';
-
-
--- 9. POPULATE JSONB MENU SNAPSHOTS FOR REDIS FALLBACK (CompiledMenuSnapshot Contract)
-WITH
-  snapshot_payload AS (
-    SELECT
-      r."id" AS restaurant_id,
-      md5(r."id"::TEXT || now()::TEXT) AS version_hash,
-      to_char(
-        now() AT TIME ZONE 'UTC',
-        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-      ) AS generated_at,
-      r."name" AS restaurant_name,
-      r."postcodeSector" AS postcode_sector
-    FROM
-      "Restaurant" r
-  )
-INSERT INTO
-  "MenuSnapshot" (
-    "restaurantId",
-    "versionHash",
-    "serializedMenu",
-    "createdBy",
-    "updatedBy"
-  )
-SELECT
-  sp.restaurant_id,
-  sp.version_hash,
-  jsonb_build_object(
-    'restaurantId',
-    sp.restaurant_id,
-    'restaurantName',
-    sp.restaurant_name,
-    'postcodeSector',
-    sp.postcode_sector,
-    'versionHash',
-    sp.version_hash,
-    'generatedAt',
-    sp.generated_at,
-    'categories',
-    coalesce(
-      (
-        SELECT
-          jsonb_agg(
-            jsonb_build_object(
-              'id',
-              c."id",
-              'name',
-              c."name",
-              'sortWeight',
-              c."sortWeight",
-              'items',
-              coalesce(
-                (
-                  SELECT
-                    jsonb_agg(
-                      jsonb_build_object(
-                        'id',
-                        m."id",
-                        'name',
-                        m."name",
-                        'description',
-                        m."description",
-                        'basePrice',
-                        m."basePrice"::DOUBLE PRECISION,
-                        'vatRate',
-                        m."vatRate"::DOUBLE PRECISION,
-                        'allergenFlags',
-                        to_jsonb(
-                          coalesce(m."allergenFlags", '{}'::TEXT[])
-                        ),
-                        'kdsTarget',
-                        m."kdsTarget",
-                        'imageUrl',
-                        m."imageUrl",
-                        'modifiers',
-                        coalesce(
-                          (
-                            SELECT
-                              jsonb_agg(
-                                jsonb_build_object(
-                                  'id',
-                                  im."id",
-                                  'name',
-                                  im."name",
-                                  'extraPrice',
-                                  im."extraPrice"::DOUBLE PRECISION
-                                )
-                              )
-                            FROM
-                              "ItemModifier" im
-                            WHERE
-                              im."menuItemId" = m."id"
-                              AND im."deletedAt" IS NULL
-                          ),
-                          '[]'::JSONB
-                        )
-                      )
-                    )
-                  FROM
-                    "MenuItem" m
-                  WHERE
-                    m."categoryId" = c."id"
-                    AND m."isActive" = TRUE
-                    AND m."deletedAt" IS NULL
-                ),
-                '[]'::JSONB
-              )
-            )
-            ORDER BY
-              c."sortWeight" ASC
-          )
-        FROM
-          "Category" c
-        WHERE
-          c."restaurantId" = sp.restaurant_id
-          AND c."deletedAt" IS NULL
-      ),
-      '[]'::JSONB
-    )
+VALUES
+  (
+    'e0000000-0000-4000-8000-000000000001',
+    'd0000000-0000-4000-8000-000000000001',
+    NULL,
+    'Special Sindhi Chicken Biryani (1kg)',
+    'Aromatic basmati rice layered with spiced chicken, caramelized onion, and potatoes.',
+    9.50,
+    0.00,
+    ARRAY['Dairy'],
+    ARRAY['#chicken', '#onion', '#spicy'],
+    'KITCHEN_SCREEN',
+    pg_temp.seed_actor(),
+    pg_temp.seed_actor()
   ),
-  pg_temp.seed_actor()::UUID,
-  pg_temp.seed_actor()::UUID
-FROM
-  snapshot_payload sp
-ON CONFLICT ("restaurantId") DO UPDATE
-SET
-  "versionHash" = EXCLUDED."versionHash",
-  "serializedMenu" = EXCLUDED."serializedMenu",
-  "updatedAt" = CURRENT_TIMESTAMP;
-
-
--- 10. SEED 20 HISTORICAL ORDERS (15 IN-STORE POS + 5 SHOWCASE DELIVERY) & LEDGERS
-WITH
-  seeded_orders AS (
-    INSERT INTO
-      "Order" (
-        "restaurantId",
-        "customerId",
-        "diningTableId",
-        "driverId",
-        "orderSource",
-        "paymentMethod",
-        "subtotal",
-        "vatTotal",
-        "deliveryFee",
-        "tipAmount",
-        "totalAmount",
-        "createdBy",
-        "updatedBy"
-      )
-    SELECT
-      r."id",
-      CASE
-        WHEN o_idx = 2
-        AND right(r."id"::TEXT, 2)::INT > 5 THEN '11111111-1111-4111-8111-111111111111'::UUID
-        ELSE NULL
-      END,
-      (
-        SELECT
-          dt."id"
-        FROM
-          "DiningTable" dt
-        WHERE
-          dt."restaurantId" = r."id"
-        LIMIT
-          1
-      ),
-      CASE
-        WHEN o_idx = 2
-        AND right(r."id"::TEXT, 2)::INT > 5 THEN '33333333-3333-4333-8333-333333333333'::UUID
-        ELSE NULL
-      END,
-      CASE
-        WHEN o_idx = 2
-        AND right(r."id"::TEXT, 2)::INT > 5 THEN 'ONLINE_DELIVERY'::"OrderSource"
-        ELSE 'DINE_IN'::"OrderSource"
-      END,
-      CASE
-        WHEN o_idx = 2
-        AND right(r."id"::TEXT, 2)::INT > 5 THEN 'ONLINE_GATEWAY'::"InStorePaymentMethod"
-        ELSE 'CARD_TERMINAL'::"InStorePaymentMethod"
-      END,
-      14.99,
-      3.00,
-      CASE
-        WHEN o_idx = 2
-        AND right(r."id"::TEXT, 2)::INT > 5 THEN 2.50
-        ELSE 0.00
-      END,
-      2.00,
-      CASE
-        WHEN o_idx = 2
-        AND right(r."id"::TEXT, 2)::INT > 5 THEN 22.49
-        ELSE 19.99
-      END,
-      pg_temp.seed_actor()::UUID,
-      pg_temp.seed_actor()::UUID
-    FROM
-      "Restaurant" r
-      CROSS JOIN generate_series(1, 2) AS o_idx
-    RETURNING
-      "id",
-      "restaurantId",
-      "totalAmount"
-  ),
-  inserted_lines AS (
-    INSERT INTO
-      "OrderLineItem" (
-        "orderId",
-        "itemName",
-        "frozenPrice",
-        "quantity",
-        "createdBy",
-        "updatedBy"
-      )
-    SELECT
-      so."id",
-      'The Light One',
-      8.99,
-      1,
-      pg_temp.seed_actor()::UUID,
-      pg_temp.seed_actor()::UUID
-    FROM
-      seeded_orders so
-  )
+  (
+    'e0000000-0000-4000-8000-000000000002',
+    'd0000000-0000-4000-8000-000000000002',
+    NULL,
+    'BiteIn Double Smash',
+    'Two aged beef patties, cheddar cheese, crispy onion, house burger sauce.',
+    10.99,
+    20.00,
+    ARRAY['Gluten', 'Dairy', 'Mustard'],
+    ARRAY['#beef', '#cheese', '#onion'],
+    'KITCHEN_SCREEN',
+pg_temp.seed_actor(),
+pg_temp.seed_actor()
+),
+(
+'e0000000-0000-4000-8000-000000000003',
+'d0000000-0000-4000-8000-000000000003',
+NULL,
+'Cloud Quadruple Stack',
+'Four smashed beef patties, double mozzarella, smoky jalapeno relish.',
+12.49,
+20.00,
+ARRAY['Gluten', 'Dairy'],
+ARRAY['#beef', '#cheese', '#spicy'],
+'KITCHEN_SCREEN',
+pg_temp.seed_actor(),
+pg_temp.seed_actor()
+),
+(
+'e0000000-0000-4000-8000-000000000004',
+'d0000000-0000-4000-8000-000000000004',
+NULL,
+'Karachi Tikka Feast Pizza (Large)',
+'Chargrilled chicken tikka, mozzarella cheese, red onion, green capsicum.',
+14.99,
+20.00,
+ARRAY['Gluten', 'Dairy'],
+ARRAY['#chicken', '#cheese', '#onion'],
+'KITCHEN_SCREEN',
+pg_temp.seed_actor(),
+pg_temp.seed_actor()
+),
+(
+'e0000000-0000-4000-8000-000000000005',
+'d0000000-0000-4000-8000-000000000004',
+NULL,
+'Smoky Beef Pepperoni Pan (Large)',
+'Halal beef pepperoni, extra mozzarella cheese, oregano tomato sauce.',
+15.99,
+20.00,
+ARRAY['Gluten', 'Dairy'],
+ARRAY['#beef', '#cheese'],
+'KITCHEN_SCREEN',
+pg_temp.seed_actor(),
+pg_temp.seed_actor()
+),
+(
+'e0000000-0000-4000-8000-000000000006',
+'d0000000-0000-4000-8000-000000000005',
+NULL,
+'Super Supreme Stuffed Crust',
+'Beef, chicken, mozzarella cheese, onions, mushrooms, and olives.',
+17.49,
+20.00,
+ARRAY['Gluten', 'Dairy'],
+ARRAY['#beef', '#chicken', '#cheese', '#onion'],
+'KITCHEN_SCREEN',
+pg_temp.seed_actor(),
+pg_temp.seed_actor()
+)
+ON CONFLICT ("id") DO NOTHING;
+-- Suburb opt-in override for PizzaIn Gulshan-e-Iqbal (SELECTED_ITEMS_ONLY: includes Chicken Tikka Pizza with +1.00 branch price)
 INSERT INTO
-  "FinancialLedger" (
-    "orderId",
-    "entityName",
-    "creditAmount",
-    "description",
-    "createdBy",
-    "updatedBy"
-  )
-SELECT
-  so."id",
-  'RESTAURANT_' || so."restaurantId"::TEXT,
-  so."totalAmount",
-  'POS / Online order gross settlement',
-  pg_temp.seed_actor()::UUID,
-  pg_temp.seed_actor()::UUID
-FROM
-  seeded_orders so;
+"BranchMenuOverride" (
+"branchId",
+"menuItemId",
+"isIncluded",
+"isAvailable",
+"priceOverride",
+"approvalStatus",
+"createdBy",
+"updatedBy"
+)
+VALUES
+(
+'b0000000-0000-4000-8000-000000000005',
+'e0000000-0000-4000-8000-000000000004',
+TRUE,
+TRUE,
+15.99,
+'APPROVED',
+pg_temp.seed_actor(),
+pg_temp.seed_actor()
+),
+(
+'b0000000-0000-4000-8000-000000000008',
+'e0000000-0000-4000-8000-000000000006',
+TRUE,
+TRUE,
+NULL,
+'NONE',
+pg_temp.seed_actor(),
+pg_temp.seed_actor()
+)
+ON CONFLICT DO NOTHING;

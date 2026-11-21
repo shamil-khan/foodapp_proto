@@ -110,7 +110,7 @@ export class LedgerRepository {
     const insertCmd = sqlInsert(LoyaltyLedgerTable)
       .values({
         userId: params.userId,
-        restaurantId: params.restaurantId ?? null,
+        branchId: params.restaurantId ?? null,
         orderId: params.orderId ?? null,
         txType: params.txType,
         pointsDelta: params.pointsDelta,

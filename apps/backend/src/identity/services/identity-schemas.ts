@@ -11,29 +11,48 @@ export const PermissionSchema = z.enum(ALL_PERMISSIONS).openapi('Permission');
 
 export const PosLoginBodySchema = z
   .object({
-    subdomain: z
+    brandHandle: z
       .string()
       .min(2)
       .max(63)
-      .regex(/^[a-z0-9-]+$/i, 'Subdomain must contain only letters, numbers, and hyphens')
+      .regex(/^[a-z0-9-]+$/i, 'Brand handle must contain only letters, numbers, and hyphens')
       .openapi({
-        example: 'westminster-patty',
-        description: 'Unique restaurant URL subdomain (e.g. subway from ://fapp.com)',
+        example: 'pizza-hut',
       }),
     email: z.email().openapi({
-      example: 'staff1.0002@pos-tenant.co.uk',
+      example: 'owner@://example.com',
     }),
     password: z.string().min(1).openapi({
       example: 'Password123!',
     }),
+    branchId: z.uuid().optional(),
   })
   .openapi('PosLoginBody');
+
+export const SwitchBranchBodySchema = z
+  .object({
+    targetBranchId: z.uuid(),
+  })
+  .openapi('SwitchBranchBody');
+
+export const StaffAssignedBranchSchema = z.object({
+  branchId: z.uuid(),
+  branchName: z.string(),
+  branchKey: z.string(),
+  city: z.string(),
+  cityKey: z.string(),
+  roleId: z.string(),
+  roleName: z.string(),
+  isPrimary: z.boolean(),
+});
 
 export const PosStaffClaimsSchema = z
   .object({
     staffId: z.uuid(),
     restaurantId: z.uuid(),
-    subdomain: z.string(),
+    brandHandle: z.string(),
+    activeBranchId: z.string(),
+    activeBranchKey: z.string(),
     roleId: z.string(),
     role: z.enum([
       'OWNER',
@@ -44,15 +63,14 @@ export const PosStaffClaimsSchema = z
     name: z.string(),
     email: z.email(),
     permissions: z.array(PermissionSchema),
+    assignedBranches: z.array(StaffAssignedBranchSchema),
   })
   .openapi('PosStaffClaims');
 
 export const PosLoginResponseSchema = z
   .object({
     success: z.literal(true),
-    token: z.string().openapi({
-      description: 'HS256 POS shift JWT (12h TTL)',
-    }),
+    token: z.string(),
     staff: PosStaffClaimsSchema,
   })
   .openapi('PosLoginResponse');
@@ -69,16 +87,11 @@ export const ActiveActorProfileSchema = z
     email: z.email(),
     role: z.string(),
     restaurantId: z.uuid().optional(),
+    branchId: z.string().optional(),
     roleId: z.string().optional(),
     permissions: z.array(PermissionSchema),
   })
   .openapi('ActiveActorProfile');
-
-export const GetCurrentActorResponseSchema = z
-  .object({
-    actor: ActiveActorProfileSchema,
-  })
-  .openapi('GetCurrentActorResponse');
 
 export const StaffRoleItemSchema = z
   .object({
@@ -100,7 +113,6 @@ export const ListRolesQuerySchema = z.object({
         name: 'restaurantId',
         in: 'query',
       },
-      description: 'Optional target restaurantId (allowed only for PLATFORM_ADMIN)',
     }),
 });
 
@@ -121,11 +133,12 @@ export const StaffIdParamSchema = z.object({
     },
   }),
 });
+
 export const CreateStaffRoleBodySchema = z
   .object({
     restaurantId: z.uuid().optional(),
     name: z.string().min(2).max(50).openapi({
-      example: 'SHIFT_SUPERVISOR',
+      example: 'EVENING_FLOOR_LEAD',
     }),
     description: z.string().max(255).optional(),
     permissions: z.array(TenantPermissionSchema).min(1),
@@ -140,11 +153,14 @@ export const UpdateStaffRoleBodySchema = z
   })
   .openapi('UpdateStaffRoleBody');
 
-export const AssignStaffRoleBodySchema = z
+export const AssignStaffBranchAccessBodySchema = z
   .object({
+    branchId: z.uuid().optional(),
     roleId: z.uuid(),
+    directPermissions: z.array(TenantPermissionSchema).optional(),
+    isPrimary: z.boolean().optional(),
   })
-  .openapi('AssignStaffRoleBody');
+  .openapi('AssignStaffBranchAccessBody');
 
 export const loginPosStaffRoute = createRoute({
   method: 'post',
@@ -152,7 +168,7 @@ export const loginPosStaffRoute = createRoute({
   tags: [
     'Identity',
   ],
-  summary: 'Authenticate POS tenant staff by restaurant subdomain and issue 12-hour shift JWT',
+  summary: 'Authenticate POS staff by brand handle and issue 12h shift JWT + assigned branches',
   request: {
     body: {
       required: true,
@@ -165,7 +181,7 @@ export const loginPosStaffRoute = createRoute({
   },
   responses: {
     200: {
-      description: 'Authenticated POS staff session with resolved permissions',
+      description: 'Authenticated POS staff session',
       content: {
         'application/json': {
           schema: PosLoginResponseSchema,
@@ -173,15 +189,18 @@ export const loginPosStaffRoute = createRoute({
       },
     },
     400: {
-      description: 'Validation error',
+      description: 'Validation or domain rule error',
       content: {
         'application/json': {
-          schema: ValidationErrorResponseSchema,
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
         },
       },
     },
     401: {
-      description: 'Invalid POS staff credentials',
+      description: 'Invalid credentials',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -189,7 +208,101 @@ export const loginPosStaffRoute = createRoute({
       },
     },
     403: {
-      description: 'Restaurant account suspended',
+      description: 'Tenant suspended or no branch assigned',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const switchPosBranchRoute = createRoute({
+  method: 'post',
+  path: '/pos/auth/switch-branch',
+  tags: [
+    'Identity',
+  ],
+  summary: 'Switch active branch on the single POS shift cookie and refresh branch permissions',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: SwitchBranchBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Switched branch session',
+      content: {
+        'application/json': {
+          schema: PosLoginResponseSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
+    401: {
+      description: 'Unauthorized',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    403: {
+      description: 'Target branch not assigned',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Branch not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -229,7 +342,7 @@ export const getCurrentActorRoute = createRoute({
   tags: [
     'Identity',
   ],
-  summary: 'Get currently authenticated actor and effective permissions',
+  summary: 'Get currently authenticated actor, active branchId, and effective permissions',
   security: [
     {
       bearerAuth: [],
@@ -237,10 +350,12 @@ export const getCurrentActorRoute = createRoute({
   ],
   responses: {
     200: {
-      description: 'Active actor profile with permissions',
+      description: 'Active actor profile',
       content: {
         'application/json': {
-          schema: GetCurrentActorResponseSchema,
+          schema: z.object({
+            actor: ActiveActorProfileSchema,
+          }),
         },
       },
     },
@@ -254,13 +369,14 @@ export const getCurrentActorRoute = createRoute({
     },
   },
 });
+
 export const listAssignablePermissionsRoute = createRoute({
   method: 'get',
   path: '/pos/roles/rights',
   tags: [
     'Identity & Roles',
   ],
-  summary: 'List all system-defined tenant rights assignable to restaurant roles',
+  summary: 'List all system-defined tenant rights and grouped catalog metadata',
   security: [
     {
       bearerAuth: [],
@@ -268,15 +384,28 @@ export const listAssignablePermissionsRoute = createRoute({
   ],
   responses: {
     200: {
-      description: 'Available tenant permissions',
+      description: 'Available tenant rights and catalog',
       content: {
         'application/json': {
           schema: z.object({
             rights: z.array(TenantPermissionSchema),
+            catalog: z.array(z.record(z.string(), z.unknown())),
           }),
         },
       },
     },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
     401: {
       description: 'Unauthorized',
       content: {
@@ -293,6 +422,22 @@ export const listAssignablePermissionsRoute = createRoute({
         },
       },
     },
+    404: {
+      description: 'Not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
   },
 });
 
@@ -302,7 +447,7 @@ export const listStaffRolesRoute = createRoute({
   tags: [
     'Identity & Roles',
   ],
-  summary: 'List dynamic roles and assigned rights for a restaurant',
+  summary: 'List predefined and custom roles for a brand',
   security: [
     {
       bearerAuth: [],
@@ -313,7 +458,7 @@ export const listStaffRolesRoute = createRoute({
   },
   responses: {
     200: {
-      description: 'Restaurant roles with rights',
+      description: 'Brand roles with rights',
       content: {
         'application/json': {
           schema: z.object({
@@ -322,6 +467,18 @@ export const listStaffRolesRoute = createRoute({
         },
       },
     },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
     401: {
       description: 'Unauthorized',
       content: {
@@ -331,7 +488,23 @@ export const listStaffRolesRoute = createRoute({
       },
     },
     403: {
-      description: 'Tenant or right forbidden',
+      description: 'Forbidden',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -347,7 +520,7 @@ export const createStaffRoleRoute = createRoute({
   tags: [
     'Identity & Roles',
   ],
-  summary: 'Create a custom restaurant role with specific rights',
+  summary: 'Create a custom role (rights cannot exceed actor permissions)',
   security: [
     {
       bearerAuth: [],
@@ -365,7 +538,7 @@ export const createStaffRoleRoute = createRoute({
   },
   responses: {
     201: {
-      description: 'Role created',
+      description: 'Custom role created',
       content: {
         'application/json': {
           schema: z.object({
@@ -377,7 +550,7 @@ export const createStaffRoleRoute = createRoute({
       },
     },
     400: {
-      description: 'Validation or domain error',
+      description: 'Validation or domain rule error',
       content: {
         'application/json': {
           schema: z.union([
@@ -387,8 +560,25 @@ export const createStaffRoleRoute = createRoute({
         },
       },
     },
+
+    401: {
+      description: 'Unauthorized',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
     403: {
-      description: 'Tenant or right forbidden',
+      description: 'Forbidden or privilege escalation denied',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Not found',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -396,7 +586,7 @@ export const createStaffRoleRoute = createRoute({
       },
     },
     409: {
-      description: 'Role name already exists',
+      description: 'Role exists',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -412,7 +602,7 @@ export const updateStaffRoleRoute = createRoute({
   tags: [
     'Identity & Roles',
   ],
-  summary: 'Update role name/description and replace assigned rights (invalidates Redis cache)',
+  summary: 'Update custom role (predefined system roles are immutable)',
   security: [
     {
       bearerAuth: [],
@@ -439,7 +629,19 @@ export const updateStaffRoleRoute = createRoute({
       },
     },
     400: {
-      description: 'Validation or domain error',
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
+    401: {
+      description: 'Unauthorized',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -447,7 +649,7 @@ export const updateStaffRoleRoute = createRoute({
       },
     },
     403: {
-      description: 'Forbidden or OWNER role locked',
+      description: 'System role locked or privilege escalation denied',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -456,6 +658,14 @@ export const updateStaffRoleRoute = createRoute({
     },
     404: {
       description: 'Role not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -471,7 +681,7 @@ export const deleteStaffRoleRoute = createRoute({
   tags: [
     'Identity & Roles',
   ],
-  summary: 'Soft-delete a custom restaurant role',
+  summary: 'Soft-delete a custom role (predefined system roles are immutable)',
   security: [
     {
       bearerAuth: [],
@@ -490,7 +700,19 @@ export const deleteStaffRoleRoute = createRoute({
       },
     },
     400: {
-      description: 'Validation or domain error',
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
+    401: {
+      description: 'Unauthorized',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -498,7 +720,7 @@ export const deleteStaffRoleRoute = createRoute({
       },
     },
     403: {
-      description: 'Forbidden or system role locked',
+      description: 'System role locked',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -514,7 +736,7 @@ export const deleteStaffRoleRoute = createRoute({
       },
     },
     409: {
-      description: 'Role currently assigned to active staff',
+      description: 'Role in use',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -524,13 +746,13 @@ export const deleteStaffRoleRoute = createRoute({
   },
 });
 
-export const assignStaffRoleRoute = createRoute({
+export const assignStaffBranchAccessRoute = createRoute({
   method: 'patch',
-  path: '/pos/staff/{staffId}/role',
+  path: '/pos/staff/{staffId}/branch-access',
   tags: [
     'Identity & Roles',
   ],
-  summary: 'Assign a restaurant role to a staff member',
+  summary: 'Assign a role and optional direct individual permissions to a staff member on a branch',
   security: [
     {
       bearerAuth: [],
@@ -542,14 +764,14 @@ export const assignStaffRoleRoute = createRoute({
       required: true,
       content: {
         'application/json': {
-          schema: AssignStaffRoleBodySchema,
+          schema: AssignStaffBranchAccessBodySchema,
         },
       },
     },
   },
   responses: {
     200: {
-      description: 'Staff role updated',
+      description: 'Staff branch access updated',
       content: {
         'application/json': {
           schema: SuccessFlagResponseSchema,
@@ -557,7 +779,18 @@ export const assignStaffRoleRoute = createRoute({
       },
     },
     400: {
-      description: 'Validation or domain error',
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+    401: {
+      description: 'Unauthorized',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -565,7 +798,7 @@ export const assignStaffRoleRoute = createRoute({
       },
     },
     403: {
-      description: 'Tenant or right forbidden',
+      description: 'Forbidden or privilege escalation denied',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -574,6 +807,14 @@ export const assignStaffRoleRoute = createRoute({
     },
     404: {
       description: 'Staff or role not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,

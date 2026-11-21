@@ -1,4 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi';
+import { RESERVED_BRAND_HANDLES } from '@/catalog/application/branch-commands';
 import {
   DomainErrorResponseSchema,
   PaginationQuerySchema,
@@ -6,75 +7,137 @@ import {
   ValidationErrorResponseSchema,
 } from '@/core/services/openapi-shared';
 
-export const StorefrontRestaurantSchema = z
+export const KitchenTypeSchema = z.enum([
+  'RESTAURANT_BRANCH',
+  'HOME_KITCHEN',
+  'CLOUD_KITCHEN',
+]);
+export const OperationalStatusSchema = z.enum([
+  'OPEN',
+  'BUSY_PAUSED',
+  'CLOSED',
+  'HOLIDAY',
+]);
+export const MenuPricingModeSchema = z.enum([
+  'CENTRAL_LOCKED',
+  'BRANCH_DIRECT',
+  'BRANCH_APPROVAL_REQUIRED',
+  'THRESHOLD_HYBRID',
+]);
+
+export const StorefrontBrandSchema = z
   .object({
     id: z.uuid(),
     name: z.string(),
-    subdomain: z.string().openapi({
-      example: 'westminster-patty',
-    }),
-    postcodeSector: z.string().openapi({
-      example: 'E1 6',
-    }),
+    handle: z.string(),
+    logoUrl: z.string().nullable(),
+    description: z.string().nullable(),
     foodHygieneRating: z.number().int().nullable(),
-    averagePrepTimeMinutes: z.number().int(),
     branding: z
       .object({
         templateId: z.string(),
         primaryColor: z.string(),
         bannerUrl: z.string().nullable(),
+        galleryImages: z.unknown(),
       })
       .nullable(),
   })
-  .openapi('StorefrontRestaurant');
+  .openapi('StorefrontBrand');
 
-export const SubdomainParamSchema = z.object({
-  subdomain: z
+export const StorefrontBranchSchema = z
+  .object({
+    id: z.uuid(),
+    restaurantId: z.uuid(),
+    name: z.string(),
+    branchKey: z.string(),
+    city: z.string(),
+    cityKey: z.string(),
+    kitchenType: KitchenTypeSchema,
+    operationalStatus: OperationalStatusSchema,
+    statusLockedUntil: z.string().nullable(),
+    supportsDineIn: z.boolean(),
+    supportsTakeaway: z.boolean(),
+    supportsPlatformDelivery: z.boolean(),
+    averagePrepTimeMinutes: z.number().int(),
+    scheduleConfig: z.record(z.string(), z.unknown()),
+    location: z.object({
+      isAddressRedacted: z.boolean(),
+      privacyNotice: z.string().nullable(),
+      postcodeSector: z.string(),
+      areaLocality: z.string().nullable(),
+      streetAddress: z.string().nullable(),
+      latitude: z.number().nullable(),
+      longitude: z.number().nullable(),
+      dropPoint: z.record(z.string(), z.unknown()).nullable(),
+      contactPersonName: z.string(),
+      contactPersonPhone: z.string().nullable(),
+      contactPersonEmail: z.string().nullable(),
+      canOrderTakeawayDirectly: z.boolean(),
+      takeawayWhitelistStatus: z.enum([
+        'NOT_REQUIRED',
+        'NONE',
+        'PENDING',
+        'APPROVED',
+        'REJECTED',
+      ]),
+    }),
+  })
+  .openapi('StorefrontBranch');
+
+export const BrandHandleParamSchema = z.object({
+  brand: z
     .string()
     .min(2)
     .max(63)
     .openapi({
       param: {
-        name: 'subdomain',
+        name: 'brand',
         in: 'path',
       },
-      example: 'westminster-patty',
+      example: 'pizza-hut',
     }),
 });
 
-export const ListRestaurantsQuerySchema = PaginationQuerySchema.extend({
-  postcodeSector: z
+export const BranchSlugParamsSchema = z.object({
+  brand: z
     .string()
-    .optional()
+    .min(2)
+    .max(63)
     .openapi({
       param: {
-        name: 'postcodeSector',
-        in: 'query',
+        name: 'brand',
+        in: 'path',
       },
-      example: 'SW1A',
+      example: 'pizza-hut',
     }),
-  search: z
+  city: z
     .string()
-    .optional()
+    .min(2)
+    .max(63)
     .openapi({
       param: {
-        name: 'search',
-        in: 'query',
+        name: 'city',
+        in: 'path',
       },
-      example: 'Curry',
+      example: 'karachi',
+    }),
+  branch: z
+    .string()
+    .min(2)
+    .max(63)
+    .openapi({
+      param: {
+        name: 'branch',
+        in: 'path',
+      },
+      example: 'clifton',
     }),
 });
 
-export const ListRestaurantsResponseSchema = z
-  .object({
-    restaurants: z.array(StorefrontRestaurantSchema),
-  })
-  .openapi('ListRestaurantsResponse');
-
-export const RestaurantIdParamSchema = z.object({
-  restaurantId: z.uuid().openapi({
+export const BranchIdParamSchema = z.object({
+  branchId: z.uuid().openapi({
     param: {
-      name: 'restaurantId',
+      name: 'branchId',
       in: 'path',
     },
   }),
@@ -89,304 +152,225 @@ export const ItemIdParamSchema = z.object({
   }),
 });
 
-export const SnapshotModifierSchema = z
+export const RegisterBrandBodySchema = z
   .object({
-    id: z.uuid(),
-    name: z.string(),
-    extraPrice: z.number(),
-  })
-  .openapi('SnapshotModifier');
-
-export const SnapshotMenuItemSchema = z
-  .object({
-    id: z.uuid(),
-    name: z.string(),
-    description: z.string().nullable(),
-    basePrice: z.number(),
-    vatRate: z.number(),
-    allergenFlags: z.array(z.string()),
-    kdsTarget: z.enum([
-      'KITCHEN_SCREEN',
-      'BAR_PRINTER',
-      'PASTRY_STATION',
-    ]),
-    imageUrl: z.string().nullable(),
-    modifiers: z.array(SnapshotModifierSchema),
-  })
-  .openapi('SnapshotMenuItem');
-
-export const SnapshotCategorySchema = z
-  .object({
-    id: z.uuid(),
-    name: z.string(),
-    sortWeight: z.number().int(),
-    items: z.array(SnapshotMenuItemSchema),
-  })
-  .openapi('SnapshotCategory');
-
-export const CompiledMenuSnapshotSchema = z
-  .object({
-    restaurantId: z.uuid(),
-    restaurantName: z.string(),
-    postcodeSector: z.string(),
-    versionHash: z.string(),
-    generatedAt: z.string(),
-    categories: z.array(SnapshotCategorySchema),
-  })
-  .openapi('CompiledMenuSnapshot');
-export const UpdateMenuItemPriceBodySchema = z
-  .object({
-    newBasePrice: z.number().min(0).openapi({
-      example: 12.99,
-    }),
-    expectedRowVersion: z.number().int().min(1).openapi({
-      example: 1,
-    }),
-  })
-  .openapi('UpdateMenuItemPriceBody');
-
-export const UpdateMenuItemPriceResponseSchema = z
-  .object({
-    success: z.literal(true),
-    menuItemId: z.uuid(),
-  })
-  .openapi('UpdateMenuItemPriceResponse');
-
-export const CreateRestaurantByAdminBodySchema = z
-  .object({
-    name: z.string().min(2).max(120).openapi({
-      example: 'Subway Soho',
-    }),
-    subdomain: z
+    brandName: z.string().min(2).max(120),
+    handle: z
       .string()
       .min(2)
       .max(63)
       .regex(/^[a-z0-9-]+$/i)
-      .openapi({
-        example: 'subway',
+      .refine((val) => !RESERVED_BRAND_HANDLES.has(val.trim().toLowerCase()), {
+        message: 'This brand handle is reserved by the platform.',
       }),
-    postcodeSector: z.string().min(2).max(10).openapi({
-      example: 'W1D',
-    }),
-    ownerName: z.string().min(2).max(100).openapi({
-      example: 'Subway Soho Owner',
-    }),
-    ownerEmail: z.email().openapi({
-      example: 'owner@subway-soho.co.uk',
-    }),
-    ownerPassword: z.string().min(8).openapi({
-      example: 'OwnerPass123!',
-    }),
-    platformFeeRate: z.number().min(0).max(50).optional().openapi({
-      example: 12.5,
-    }),
+    logoUrl: z.string().optional(),
+    description: z.string().optional(),
+    kitchenType: KitchenTypeSchema,
+    isMultiBranchEnterprise: z.boolean().optional(),
+    branchName: z.string().min(2).max(120),
+    branchKey: z.string().min(2).max(63).optional(),
+    city: z.string().min(2).max(80),
+    postcodeSector: z.string().min(2).max(20),
+    streetAddress: z.string().min(4).max(255),
+    areaLocality: z.string().optional(),
+    latitude: z.number().optional(),
+    longitude: z.number().optional(),
+    contactPersonName: z.string().min(2).max(100),
+    contactPersonPhone: z.string().min(5).max(30),
+    contactPersonEmail: z.email().optional(),
+    supportsDineIn: z.boolean().optional(),
+    supportsTakeaway: z.boolean().optional(),
+    supportsPlatformDelivery: z.boolean().optional(),
+    dropPointConfig: z
+      .object({
+        label: z.string().min(2),
+        areaLocality: z.string().optional(),
+        instructions: z.string().optional(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+      })
+      .nullable()
+      .optional(),
+    ownerName: z.string().min(2).max(100),
+    ownerEmail: z.email(),
+    ownerPassword: z.string().min(8),
   })
-  .openapi('CreateRestaurantByAdminBody');
+  .openapi('RegisterBrandBody');
 
-export const UpdateRestaurantStatusBodySchema = z
+export const CreateBranchBodySchema = z
   .object({
-    isActive: z.boolean(),
+    restaurantId: z.uuid().optional(),
+    name: z.string().min(2).max(120),
+    branchKey: z.string().min(2).max(63).optional(),
+    city: z.string().min(2).max(80),
+    kitchenType: KitchenTypeSchema.default('RESTAURANT_BRANCH'),
+    postcodeSector: z.string().min(2).max(20),
+    streetAddress: z.string().min(4).max(255),
+    areaLocality: z.string().optional(),
+    latitude: z.number().optional(),
+    longitude: z.number().optional(),
+    contactPersonName: z.string().min(2).max(100),
+    contactPersonPhone: z.string().min(5).max(30),
+    contactPersonEmail: z.email().optional(),
+    supportsDineIn: z.boolean().optional(),
+    supportsTakeaway: z.boolean().optional(),
+    supportsPlatformDelivery: z.boolean().optional(),
+    menuSelectionMode: z
+      .enum([
+        'ALL_BRAND_ITEMS',
+        'SELECTED_ITEMS_ONLY',
+      ])
+      .optional(),
   })
-  .openapi('UpdateRestaurantStatusBody');
+  .openapi('CreateBranchBody');
 
-export const listRestaurantsRoute = createRoute({
+export const UpdateBranchStatusBodySchema = z.object({
+  operationalStatus: OperationalStatusSchema,
+  reason: z.string().max(255).optional(),
+});
+
+export const UpdateBranchSettingsBodySchema = z.object({
+  supportsDineIn: z.boolean().optional(),
+  supportsTakeaway: z.boolean().optional(),
+  supportsPlatformDelivery: z.boolean().optional(),
+  homePickupPrivacyMode: z
+    .enum([
+      'ORDER_ACCEPTANCE',
+      'WHITELIST',
+    ])
+    .optional(),
+  dropPointConfig: z
+    .object({
+      label: z.string().min(2),
+      areaLocality: z.string().optional(),
+      instructions: z.string().optional(),
+      latitude: z.number().optional(),
+      longitude: z.number().optional(),
+    })
+    .nullable()
+    .optional(),
+  menuSelectionMode: z
+    .enum([
+      'ALL_BRAND_ITEMS',
+      'SELECTED_ITEMS_ONLY',
+    ])
+    .optional(),
+  scheduleConfig: z.record(z.string(), z.unknown()).optional(),
+  contactPersonName: z.string().optional(),
+  contactPersonPhone: z.string().optional(),
+  contactPersonEmail: z.email().nullable().optional(),
+});
+
+export const ReviewWhitelistBodySchema = z.object({
+  customerUserId: z.uuid(),
+  decision: z.enum([
+    'APPROVED',
+    'REJECTED',
+  ]),
+});
+
+export const UpsertPricingPolicyBodySchema = z.object({
+  restaurantId: z.uuid().optional(),
+  branchId: z.uuid().nullable().optional(),
+  menuPricingMode: MenuPricingModeSchema,
+  maxDirectPriceDeltaPercent: z.number().min(0).max(100),
+  allowBranchLocalItems: z.boolean(),
+  maxDirectOrderDiscountPercent: z.number().min(0).max(100),
+  allowFullCompWaiveOff: z.boolean(),
+  requireReasonForCompOrDiscount: z.boolean(),
+  maxDirectRefundAmount: z.number().min(0),
+});
+
+export const UpsertBranchMenuOverrideBodySchema = z.object({
+  isIncluded: z.boolean().optional(),
+  isAvailable: z.boolean().optional(),
+  proposedPrice: z.number().min(0).nullable().optional(),
+});
+
+export const ReviewPriceOverrideBodySchema = z.object({
+  decision: z.enum([
+    'APPROVED',
+    'REJECTED',
+  ]),
+  reviewNote: z.string().max(255).optional(),
+});
+
+export const CreateMenuItemBodySchema = z.object({
+  restaurantId: z.uuid().optional(),
+  categoryId: z.uuid(),
+  branchId: z.uuid().nullable().optional(),
+  name: z.string().min(2).max(120),
+  description: z.string().optional(),
+  basePrice: z.number().min(0),
+  vatRate: z.number().min(0).max(100).optional(),
+  allergenFlags: z.array(z.string()).optional(),
+  ingredientTags: z.array(z.string()).optional(),
+  kdsTarget: z
+    .enum([
+      'KITCHEN_SCREEN',
+      'BAR_PRINTER',
+      'PASTRY_STATION',
+    ])
+    .optional(),
+});
+
+export const listBrandsRoute = createRoute({
   method: 'get',
   path: '/',
   tags: [
     'Catalog',
   ],
-  summary: 'List active storefront restaurants',
+  summary: 'List active storefront brands',
   request: {
-    query: ListRestaurantsQuerySchema,
+    query: PaginationQuerySchema.extend({
+      search: z
+        .string()
+        .optional()
+        .openapi({
+          param: {
+            name: 'search',
+            in: 'query',
+          },
+        }),
+    }),
   },
   responses: {
     200: {
-      description: 'Active restaurants matching filters',
-      content: {
-        'application/json': {
-          schema: ListRestaurantsResponseSchema,
-        },
-      },
-    },
-    400: {
-      description: 'Validation error',
-      content: {
-        'application/json': {
-          schema: ValidationErrorResponseSchema,
-        },
-      },
-    },
-  },
-});
-
-export const getRestaurantBySubdomainRoute = createRoute({
-  method: 'get',
-  path: '/by-subdomain/{subdomain}',
-  tags: [
-    'Catalog',
-  ],
-  summary: 'Resolve active storefront restaurant by URL subdomain (e.g. subway from ://fapp.com)',
-  request: {
-    params: SubdomainParamSchema,
-  },
-  responses: {
-    200: {
-      description: 'Resolved storefront restaurant',
+      description: 'Active brands',
       content: {
         'application/json': {
           schema: z.object({
-            restaurant: StorefrontRestaurantSchema,
+            brands: z.array(StorefrontBrandSchema),
           }),
         },
       },
     },
-    404: {
-      description: 'Restaurant subdomain not found or inactive',
-      content: {
-        'application/json': {
-          schema: DomainErrorResponseSchema,
-        },
-      },
-    },
   },
 });
 
-export const getMenuSnapshotRoute = createRoute({
-  method: 'get',
-  path: '/{restaurantId}/menu',
-  tags: [
-    'Catalog',
-  ],
-  summary: 'Fetch compiled menu snapshot for a restaurant',
-  request: {
-    params: RestaurantIdParamSchema,
-  },
-  responses: {
-    200: {
-      description: 'Compiled menu snapshot',
-      content: {
-        'application/json': {
-          schema: CompiledMenuSnapshotSchema,
-        },
-      },
-    },
-    404: {
-      description: 'Restaurant menu not found',
-      content: {
-        'application/json': {
-          schema: DomainErrorResponseSchema,
-        },
-      },
-    },
-  },
-});
-export const updateItemPriceRoute = createRoute({
-  method: 'patch',
-  path: '/items/{itemId}/price',
-  tags: [
-    'Catalog',
-  ],
-  summary: 'Update menu item base price (requires catalog:price:update right & matching tenant)',
-  security: [
-    {
-      bearerAuth: [],
-    },
-  ],
-  request: {
-    params: ItemIdParamSchema,
-    body: {
-      required: true,
-      content: {
-        'application/json': {
-          schema: UpdateMenuItemPriceBodySchema,
-        },
-      },
-    },
-  },
-  responses: {
-    200: {
-      description: 'Menu item price updated',
-      content: {
-        'application/json': {
-          schema: UpdateMenuItemPriceResponseSchema,
-        },
-      },
-    },
-    400: {
-      description: 'Validation error',
-      content: {
-        'application/json': {
-          schema: DomainErrorResponseSchema,
-        },
-      },
-    },
-    401: {
-      description: 'Unauthorized',
-      content: {
-        'application/json': {
-          schema: DomainErrorResponseSchema,
-        },
-      },
-    },
-    403: {
-      description: 'Forbidden tenant or missing catalog:price:update right',
-      content: {
-        'application/json': {
-          schema: DomainErrorResponseSchema,
-        },
-      },
-    },
-    404: {
-      description: 'Menu item not found',
-      content: {
-        'application/json': {
-          schema: DomainErrorResponseSchema,
-        },
-      },
-    },
-    409: {
-      description: 'Optimistic locking conflict',
-      content: {
-        'application/json': {
-          schema: DomainErrorResponseSchema,
-        },
-      },
-    },
-  },
-});
-
-export const createRestaurantByAdminRoute = createRoute({
+export const registerBrandRoute = createRoute({
   method: 'post',
-  path: '/restaurants',
+  path: '/register',
   tags: [
-    'Platform Admin',
+    'Catalog',
   ],
-  summary: 'Register a new restaurant with unique subdomain, default roles, and owner account',
-  security: [
-    {
-      bearerAuth: [],
-    },
-  ],
+  summary: 'Self-service seller registration for home kitchen, cloud kitchen, or restaurant brand',
   request: {
     body: {
       required: true,
       content: {
         'application/json': {
-          schema: CreateRestaurantByAdminBodySchema,
+          schema: RegisterBrandBodySchema,
         },
       },
     },
   },
   responses: {
     201: {
-      description: 'Restaurant registered',
+      description: 'Brand and initial branch registered',
       content: {
         'application/json': {
-          schema: z.object({
-            restaurantId: z.uuid(),
-            subdomain: z.string(),
-            ownerStaffId: z.uuid(),
-          }),
+          schema: z.record(z.string(), z.unknown()),
         },
       },
     },
@@ -402,7 +386,15 @@ export const createRestaurantByAdminRoute = createRoute({
       },
     },
     403: {
-      description: 'Forbidden: PLATFORM_ADMIN required',
+      description: 'Forbidden',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Not found',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -410,7 +402,7 @@ export const createRestaurantByAdminRoute = createRoute({
       },
     },
     409: {
-      description: 'Subdomain already taken',
+      description: 'Handle already taken',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -420,48 +412,153 @@ export const createRestaurantByAdminRoute = createRoute({
   },
 });
 
-export const updateRestaurantStatusByAdminRoute = createRoute({
-  method: 'patch',
-  path: '/restaurants/{restaurantId}/status',
+export const resolveBrandByHandleRoute = createRoute({
+  method: 'get',
+  path: '/{brand}',
   tags: [
-    'Platform Admin',
+    'Catalog',
   ],
-  summary: 'Activate or suspend a restaurant tenant (PLATFORM_ADMIN only)',
-  security: [
-    {
-      bearerAuth: [],
-    },
-  ],
+  summary: 'Resolve single-location kitchen/restaurant or multi-branch city tree by brand handle',
   request: {
-    params: RestaurantIdParamSchema,
-    body: {
-      required: true,
-      content: {
-        'application/json': {
-          schema: UpdateRestaurantStatusBodySchema,
-        },
-      },
-    },
+    params: BrandHandleParamSchema,
   },
   responses: {
     200: {
-      description: 'Restaurant status updated',
+      description: 'Resolved brand storefront',
       content: {
         'application/json': {
-          schema: SuccessFlagResponseSchema,
+          schema: z.record(z.string(), z.unknown()),
         },
       },
     },
-    400: {
-      description: 'Validation or domain error',
+    404: {
+      description: 'Brand not found',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
         },
       },
     },
+  },
+});
+
+export const resolveBranchBySlugRoute = createRoute({
+  method: 'get',
+  path: '/{brand}/{city}/{branch}',
+  tags: [
+    'Catalog',
+  ],
+  summary: 'Resolve specific branch by brand handle, city, and branch slug',
+  request: {
+    params: BranchSlugParamsSchema,
+  },
+  responses: {
+    200: {
+      description: 'Resolved branch',
+      content: {
+        'application/json': {
+          schema: z.record(z.string(), z.unknown()),
+        },
+      },
+    },
+    404: {
+      description: 'Branch not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const getBranchMenuSnapshotRoute = createRoute({
+  method: 'get',
+  path: '/branches/{branchId}/menu',
+  tags: [
+    'Catalog',
+  ],
+  summary:
+    'Fetch compiled branch menu snapshot with optional ingredient hashtag filter (?tag=#cheese)',
+  request: {
+    params: BranchIdParamSchema,
+    query: z.object({
+      tag: z
+        .string()
+        .optional()
+        .openapi({
+          param: {
+            name: 'tag',
+            in: 'query',
+          },
+        }),
+    }),
+  },
+  responses: {
+    200: {
+      description: 'Compiled branch menu',
+      content: {
+        'application/json': {
+          schema: z.record(z.string(), z.unknown()),
+        },
+      },
+    },
+    404: {
+      description: 'Branch menu not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const createBrandBranchRoute = createRoute({
+  method: 'post',
+  path: '/pos/branches',
+  tags: [
+    'Catalog & Branches',
+  ],
+  summary: 'Create a new branch under the active brand',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: CreateBranchBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Branch created',
+      content: {
+        'application/json': {
+          schema: z.record(z.string(), z.unknown()),
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
     403: {
-      description: 'Forbidden: PLATFORM_ADMIN required',
+      description: 'Forbidden',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,
@@ -469,7 +566,660 @@ export const updateRestaurantStatusByAdminRoute = createRoute({
       },
     },
     404: {
-      description: 'Restaurant not found',
+      description: 'Not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Duplicate branch key in city',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const updateBranchStatusRoute = createRoute({
+  method: 'patch',
+  path: '/pos/branches/{branchId}/status',
+  tags: [
+    'Catalog & Branches',
+  ],
+  summary: 'Update branch daily status (BUSY_PAUSED locks changes for 1 hour)',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    params: BranchIdParamSchema,
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: UpdateBranchStatusBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Status updated',
+      content: {
+        'application/json': {
+          schema: z.record(z.string(), z.unknown()),
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
+    403: {
+      description: 'Forbidden',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Branch not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: '1-hour BUSY_PAUSED cooldown active',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const updateBranchSettingsRoute = createRoute({
+  method: 'patch',
+  path: '/pos/branches/{branchId}/settings',
+  tags: [
+    'Catalog & Branches',
+  ],
+  summary: 'Update branch fulfillment flags, schedule, drop point, privacy mode, or menu mode',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    params: BranchIdParamSchema,
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: UpdateBranchSettingsBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Settings updated',
+      content: {
+        'application/json': {
+          schema: SuccessFlagResponseSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
+    403: {
+      description: 'Forbidden',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Branch not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const reviewWhitelistRoute = createRoute({
+  method: 'post',
+  path: '/pos/branches/{branchId}/whitelist',
+  tags: [
+    'Catalog & Branches',
+  ],
+  summary: 'Approve or reject a customer for home-kitchen walk-in takeaway',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    params: BranchIdParamSchema,
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: ReviewWhitelistBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Whitelist decision saved',
+      content: {
+        'application/json': {
+          schema: SuccessFlagResponseSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
+    403: {
+      description: 'Forbidden',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Branch not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+// `apps/backend/src/catalog/services/catalog-schemas.ts` (Chunk 3 of 3):
+
+export const upsertPricingPolicyRoute = createRoute({
+  method: 'put',
+  path: '/pos/pricing-policy',
+  tags: [
+    'Catalog & Pricing',
+  ],
+  summary: 'Configure brand-wide or branch-level pricing workflow and POS floor discount/comp caps',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: UpsertPricingPolicyBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Pricing policy saved',
+      content: {
+        'application/json': {
+          schema: SuccessFlagResponseSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
+    403: {
+      description: 'Forbidden',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const upsertBranchMenuOverrideRoute = createRoute({
+  method: 'put',
+  path: '/pos/branches/{branchId}/menu/{itemId}',
+  tags: [
+    'Catalog & Pricing',
+  ],
+  summary: 'Set branch item opt-in/availability or propose/apply branch price override',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    params: BranchIdParamSchema.merge(ItemIdParamSchema),
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: UpsertBranchMenuOverrideBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Branch menu override saved',
+      content: {
+        'application/json': {
+          schema: z.record(z.string(), z.unknown()),
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
+    403: {
+      description: 'Forbidden or CENTRAL_LOCKED',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Branch or item not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const reviewPriceOverrideRoute = createRoute({
+  method: 'post',
+  path: '/pos/branches/{branchId}/menu/{itemId}/review',
+  tags: [
+    'Catalog & Pricing',
+  ],
+  summary: 'Approve or reject a pending branch price override proposal',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    params: BranchIdParamSchema.merge(ItemIdParamSchema),
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: ReviewPriceOverrideBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Price override reviewed',
+      content: {
+        'application/json': {
+          schema: SuccessFlagResponseSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
+    403: {
+      description: 'Forbidden',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'No pending override',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const createMenuItemRoute = createRoute({
+  method: 'post',
+  path: '/pos/items',
+  tags: [
+    'Catalog & Pricing',
+  ],
+  summary: 'Create a brand-wide or branch-local menu item with ingredient hashtags',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: CreateMenuItemBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Menu item created',
+      content: {
+        'application/json': {
+          schema: z.record(z.string(), z.unknown()),
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
+    403: {
+      description: 'Forbidden',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Category not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const createBrandByAdminRoute = createRoute({
+  method: 'post',
+  path: '/brands',
+  tags: [
+    'Platform Admin',
+  ],
+  summary: 'Provision a new brand and initial branch (PLATFORM_ADMIN only)',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: RegisterBrandBodySchema,
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: 'Brand provisioned',
+      content: {
+        'application/json': {
+          schema: z.record(z.string(), z.unknown()),
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+
+    403: {
+      description: 'Forbidden',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Handle taken',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+export const updateBrandStatusByAdminRoute = createRoute({
+  method: 'patch',
+  path: '/brands/{restaurantId}/status',
+  tags: [
+    'Platform Admin',
+  ],
+  summary: 'Activate or suspend a brand tenant (PLATFORM_ADMIN only)',
+  security: [
+    {
+      bearerAuth: [],
+    },
+  ],
+  request: {
+    params: z.object({
+      restaurantId: z.uuid().openapi({
+        param: {
+          name: 'restaurantId',
+          in: 'path',
+        },
+      }),
+    }),
+    body: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: z.object({
+            isActive: z.boolean(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: 'Status updated',
+      content: {
+        'application/json': {
+          schema: SuccessFlagResponseSchema,
+        },
+      },
+    },
+    400: {
+      description: 'Validation or domain rule error',
+      content: {
+        'application/json': {
+          schema: z.union([
+            ValidationErrorResponseSchema,
+            DomainErrorResponseSchema,
+          ]),
+        },
+      },
+    },
+    403: {
+      description: 'Forbidden',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    404: {
+      description: 'Not found',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    409: {
+      description: 'Conflict',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,

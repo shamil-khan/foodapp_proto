@@ -48,13 +48,12 @@ export function createApp(options: CreateAppOptions = {}): OpenAPIHono<AppEnv> {
   });
 
   app.use('/api/*', apiCorsMiddleware);
-
   if (enableRuntimeMiddleware) {
     app.use('/api/*', initDiScope);
   }
 
   app.route('/api', identityRoutes);
-  app.route('/api/restaurants', catalogRoutes);
+  app.route('/api/brands', catalogRoutes);
   app.route('/api/admin', adminCatalogRoutes);
   app.route('/api/pos/orders', orderRoutes);
   app.route('/api/ledger', ledgerRoutes);
@@ -83,10 +82,10 @@ export function createApp(options: CreateAppOptions = {}): OpenAPIHono<AppEnv> {
   app.doc31('/api/doc', {
     openapi: '3.1.0',
     info: {
-      title: 'FoodApp UK POS & Storefront API',
+      title: 'FoodApp Multi-Branch POS & Storefront API',
       version: '1.0.0',
       description:
-        'Multi-tenant UK Restaurant POS, Subdomain Storefront Catalog, Dynamic Roles & Rights (PBAC), Ordering, and Double-Entry Financial/Loyalty Ledger API.',
+        'Multi-branch restaurants, home/cloud kitchens, pricing workflows, and per-branch PBAC API.',
     },
   });
 
@@ -97,7 +96,6 @@ export function createApp(options: CreateAppOptions = {}): OpenAPIHono<AppEnv> {
       pageTitle: 'FoodApp API Reference',
     }),
   );
-
   app.onError(globalErrorHandler);
 
   return app;

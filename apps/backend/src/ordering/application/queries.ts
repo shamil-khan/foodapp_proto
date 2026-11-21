@@ -36,7 +36,7 @@ export class GetRestaurantOrdersHandler
   }
 
   async execute(query: GetRestaurantOrdersQuery): Promise<PosOrderSummaryDto[]> {
-    const access = this.authz.assertRestaurantAccess(query.restaurantId, 'orders:read');
+    const access = this.authz.assertBranchAccess(query.restaurantId, 'orders:read');
     if (!access.ok) {
       throw new DomainError(access.error.code, access.error.message, 403);
     }
@@ -45,7 +45,7 @@ export class GetRestaurantOrdersHandler
     const ordersQuery = sqlSelect(OrderTable)
       .select([
         cols.id,
-        cols.restaurantId,
+        cols.branchId,
         cols.diningTableId,
         cols.orderSource,
         cols.paymentMethod,
@@ -56,7 +56,7 @@ export class GetRestaurantOrdersHandler
         cols.rowVersion,
         cols.createdAt,
       ])
-      .whereEq(cols.restaurantId, query.restaurantId)
+      .whereEq(cols.branchId, query.restaurantId)
       .activeOnly()
       .orderBy(cols.createdAt, 'DESC')
       .skip(query.skip ?? 0)
@@ -67,10 +67,7 @@ export class GetRestaurantOrdersHandler
       ordersQuery.text,
       ordersQuery.params,
     );
-
-    if (orderRows.length === 0) {
-      return [];
-    }
+    if (orderRows.length === 0) return [];
 
     const mCols = OrderMilestoneLogTable.cols;
     const milestonesQuery = sqlSelect(OrderMilestoneLogTable)
@@ -93,14 +90,22 @@ export class GetRestaurantOrdersHandler
 
     const latestByOrder = new Map<string, string>();
     for (const m of milestoneRows) {
-      if (!latestByOrder.has(m.orderId)) {
-        latestByOrder.set(m.orderId, m.milestone);
-      }
+      if (!latestByOrder.has(m.orderId)) latestByOrder.set(m.orderId, m.milestone);
     }
 
     return orderRows.map((o) => ({
-      ...o,
+      id: o.id,
+      restaurantId: o.branchId,
+      diningTableId: o.diningTableId,
+      orderSource: o.orderSource,
+      paymentMethod: o.paymentMethod,
+      subtotal: o.subtotal,
+      vatTotal: o.vatTotal,
+      tipAmount: o.tipAmount,
+      totalAmount: o.totalAmount,
+      rowVersion: o.rowVersion,
       latestMilestone: latestByOrder.get(o.id) ?? 'PLACED',
+      createdAt: o.createdAt,
     }));
   }
 }

@@ -16,6 +16,7 @@ export type RequestContext = {
   actorId: string;
   actorSource: ActorSource;
   restaurantId?: string;
+  branchId?: string;
   roleId?: string;
   globalRole?: PlatformRole;
   tenantRole?: TenantRole;
@@ -90,7 +91,25 @@ export class SameRestaurantSpec extends CompositeSpecification<{
   }
 }
 
-// GoF Pattern: Specification — Composable customer/user ownership check
+export class SameBranchSpec extends CompositeSpecification<{
+  request: RequestContext;
+  targetBranchId: string;
+}> {
+  isSatisfiedBy({
+    request,
+    targetBranchId,
+  }: {
+    request: RequestContext;
+    targetBranchId: string;
+  }): boolean {
+    if (request.actorSource === 'SYSTEM') return true;
+    if (request.actorSource === 'GLOBAL_USER' && request.globalRole === 'PLATFORM_ADMIN') {
+      return true;
+    }
+    return request.actorSource === 'POS_STAFF' && request.branchId === targetBranchId;
+  }
+}
+
 export class SameUserSpec extends CompositeSpecification<{
   request: RequestContext;
   targetUserId: string;
@@ -110,12 +129,37 @@ export class SameUserSpec extends CompositeSpecification<{
   }
 }
 
-// GoF Pattern: Strategy — Request-scoped authorization policy injected via DI
+/**
+ * GoF Specification Pattern: Prevents privilege escalation by ensuring an actor
+ * can only delegate permissions they personally hold on the active branch.
+ */
+export class CanDelegatePermissionsSpec extends CompositeSpecification<{
+  request: RequestContext;
+  targetPermissions: readonly Permission[];
+}> {
+  isSatisfiedBy({
+    request,
+    targetPermissions,
+  }: {
+    request: RequestContext;
+    targetPermissions: readonly Permission[];
+  }): boolean {
+    if (request.actorSource === 'SYSTEM') return true;
+    if (request.actorSource === 'GLOBAL_USER' && request.globalRole === 'PLATFORM_ADMIN') {
+      return true;
+    }
+    const held = new Set<Permission>(request.permissions);
+    return targetPermissions.every((perm) => held.has(perm));
+  }
+}
+
 export class AuthorizationPolicy {
   private readonly request: RequestContext;
   private readonly hasPermissionSpec = new HasPermissionSpec();
   private readonly sameRestaurantSpec = new SameRestaurantSpec();
+  private readonly sameBranchSpec = new SameBranchSpec();
   private readonly sameUserSpec = new SameUserSpec();
+  private readonly canDelegateSpec = new CanDelegatePermissionsSpec();
 
   constructor(request: RequestContext) {
     this.request = request;
@@ -151,17 +195,49 @@ export class AuthorizationPolicy {
       request: this.request,
       targetRestaurantId,
     });
-
     if (!allowedTenant) {
       return err(
-        new DomainError('TENANT_FORBIDDEN', 'Access denied for target restaurant resource.', 403),
+        new DomainError('TENANT_FORBIDDEN', 'Access denied for target brand resource.', 403),
       );
     }
+    return requiredPermission ? this.assertPermission(requiredPermission) : ok(undefined);
+  }
 
-    if (requiredPermission) {
-      return this.assertPermission(requiredPermission);
+  assertBranchAccess(
+    targetBranchId: string,
+    requiredPermission?: Permission,
+  ): Result<void, DomainError> {
+    const allowedBranch = this.sameBranchSpec.isSatisfiedBy({
+      request: this.request,
+      targetBranchId,
+    });
+    if (!allowedBranch) {
+      return err(
+        new DomainError(
+          'BRANCH_FORBIDDEN',
+          'Access denied for target branch. Switch active branch first.',
+          403,
+        ),
+      );
     }
+    return requiredPermission ? this.assertPermission(requiredPermission) : ok(undefined);
+  }
 
+  assertCanDelegate(targetPermissions: readonly Permission[]): Result<void, DomainError> {
+    if (
+      !this.canDelegateSpec.isSatisfiedBy({
+        request: this.request,
+        targetPermissions,
+      })
+    ) {
+      return err(
+        new DomainError(
+          'PRIVILEGE_ESCALATION_DENIED',
+          'Cannot grant permissions that you do not personally hold.',
+          403,
+        ),
+      );
+    }
     return ok(undefined);
   }
 
@@ -173,16 +249,10 @@ export class AuthorizationPolicy {
       request: this.request,
       targetUserId,
     });
-
     if (!allowedUser) {
       return err(new DomainError('USER_FORBIDDEN', 'Access denied for target user resource.', 403));
     }
-
-    if (requiredPermission) {
-      return this.assertPermission(requiredPermission);
-    }
-
-    return ok(undefined);
+    return requiredPermission ? this.assertPermission(requiredPermission) : ok(undefined);
   }
 
   static getPlatformAdminRights(): readonly Permission[] {

@@ -11,13 +11,28 @@ import {
   CreateRestaurantByAdminHandler,
   UpdateRestaurantStatusByAdminHandler,
 } from '@/catalog/application/admin-restaurant-commands';
+import {
+  CreateBrandBranchHandler,
+  RegisterBrandHandler,
+  ReviewTakeawayWhitelistHandler,
+  UpdateBranchOperationalStatusHandler,
+  UpdateBranchSettingsHandler,
+} from '@/catalog/application/branch-commands';
 import { MenuCacheInvalidationHandler } from '@/catalog/application/cache-invalidation-handler';
 import { UpdateMenuItemPriceHandler } from '@/catalog/application/commands';
 import {
-  GetRestaurantBySubdomainHandler,
-  GetRestaurantMenuSnapshotHandler,
-  GetRestaurantsHandler,
+  CreateMenuItemHandler,
+  ReviewPriceOverrideHandler,
+  UpsertBranchMenuOverrideHandler,
+  UpsertPricingPolicyHandler,
+} from '@/catalog/application/pricing-policy-commands';
+import {
+  GetBranchMenuSnapshotHandler,
+  ListBrandsHandler,
+  ResolveBranchBySlugHandler,
+  ResolveBrandByHandleHandler,
 } from '@/catalog/application/queries';
+import { BranchStatusCache } from '@/catalog/infrastructure/branch-status-cache';
 import { CatalogRepository } from '@/catalog/infrastructure/catalog-repository';
 import { CatalogController } from '@/catalog/services/catalog-controller';
 import { AuthorizationPolicy, type RequestContext } from '@/core/application/authorization';
@@ -30,10 +45,11 @@ import {
 import { type EventBus, InMemoryEventBus } from '@/core/application/event-bus';
 import { PgEventStore } from '@/core/infrastructure/pg-event-store';
 import { PgSagaRepository } from '@/core/infrastructure/pg-saga-repository';
+import { SwitchPosBranchHandler } from '@/identity/application/branch-switch-command';
 import { LoginPosStaffHandler } from '@/identity/application/pos-login-command';
 import { GetCurrentActorHandler } from '@/identity/application/queries';
 import {
-  AssignStaffRoleHandler,
+  AssignStaffBranchAccessHandler,
   CreateStaffRoleHandler,
   DeleteStaffRoleHandler,
   UpdateStaffRoleHandler,
@@ -82,21 +98,33 @@ export const DI_TOKENS = {
   IDENTITY: {
     ROLE_PERMISSION_CACHE: 'rolePermissionCache',
     LOGIN_POS_STAFF_HANDLER: 'loginPosStaffHandler',
+    SWITCH_POS_BRANCH_HANDLER: 'switchPosBranchHandler',
     GET_ASSIGNABLE_PERMISSIONS_HANDLER: 'getAssignablePermissionsHandler',
     GET_CURRENT_ACTOR_HANDLER: 'getCurrentActorHandler',
     GET_RESTAURANT_STAFF_ROLES_HANDLER: 'getRestaurantStaffRolesHandler',
     CREATE_STAFF_ROLE_HANDLER: 'createStaffRoleHandler',
     UPDATE_STAFF_ROLE_HANDLER: 'updateStaffRoleHandler',
     DELETE_STAFF_ROLE_HANDLER: 'deleteStaffRoleHandler',
-    ASSIGN_STAFF_ROLE_HANDLER: 'assignStaffRoleHandler',
+    ASSIGN_STAFF_BRANCH_ACCESS_HANDLER: 'assignStaffBranchAccessHandler',
     CONTROLLER: 'identityController',
   },
   CATALOG: {
     REPO: 'catalogRepo',
-    GET_RESTAURANTS_HANDLER: 'getRestaurantsHandler',
-    GET_RESTAURANT_BY_SUBDOMAIN_HANDLER: 'getRestaurantBySubdomainHandler',
+    BRANCH_STATUS_CACHE: 'branchStatusCache',
+    LIST_BRANDS_HANDLER: 'listBrandsHandler',
+    RESOLVE_BRAND_BY_HANDLE_HANDLER: 'resolveBrandByHandleHandler',
+    RESOLVE_BRANCH_BY_SLUG_HANDLER: 'resolveBranchBySlugHandler',
     GET_MENU_SNAPSHOT_HANDLER: 'getMenuSnapshotHandler',
     MENU_CACHE_HANDLER: 'menuCacheHandler',
+    REGISTER_BRAND_HANDLER: 'registerBrandHandler',
+    CREATE_BRAND_BRANCH_HANDLER: 'createBrandBranchHandler',
+    UPDATE_BRANCH_STATUS_HANDLER: 'updateBranchStatusHandler',
+    UPDATE_BRANCH_SETTINGS_HANDLER: 'updateBranchSettingsHandler',
+    REVIEW_TAKEAWAY_WHITELIST_HANDLER: 'reviewTakeawayWhitelistHandler',
+    UPSERT_PRICING_POLICY_HANDLER: 'upsertPricingPolicyHandler',
+    UPSERT_BRANCH_MENU_OVERRIDE_HANDLER: 'upsertBranchMenuOverrideHandler',
+    REVIEW_PRICE_OVERRIDE_HANDLER: 'reviewPriceOverrideHandler',
+    CREATE_MENU_ITEM_HANDLER: 'createMenuItemHandler',
     CREATE_RESTAURANT_BY_ADMIN_HANDLER: 'createRestaurantByAdminHandler',
     UPDATE_RESTAURANT_STATUS_BY_ADMIN_HANDLER: 'updateRestaurantStatusByAdminHandler',
     UPDATE_ITEM_PRICE_HANDLER: 'updateItemPriceHandler',
@@ -258,6 +286,7 @@ function defineBoundedContext<
 type IdentityProvides = {
   rolePermissionCache: Spec<RolePermissionCache, 'singleton'>;
   loginPosStaffHandler: Spec<LoginPosStaffHandler, 'singleton'>;
+  switchPosBranchHandler: WithRequirements<Spec<SwitchPosBranchHandler, 'scoped'>, 'request'>;
   getAssignablePermissionsHandler: Spec<GetAssignablePermissionsHandler, 'singleton'>;
   getCurrentActorHandler: WithRequirements<Spec<GetCurrentActorHandler, 'scoped'>, 'request'>;
   getRestaurantStaffRolesHandler: WithRequirements<
@@ -267,17 +296,21 @@ type IdentityProvides = {
   createStaffRoleHandler: WithRequirements<Spec<CreateStaffRoleHandler, 'scoped'>, 'request'>;
   updateStaffRoleHandler: WithRequirements<Spec<UpdateStaffRoleHandler, 'scoped'>, 'request'>;
   deleteStaffRoleHandler: WithRequirements<Spec<DeleteStaffRoleHandler, 'scoped'>, 'request'>;
-  assignStaffRoleHandler: WithRequirements<Spec<AssignStaffRoleHandler, 'scoped'>, 'request'>;
+  assignStaffBranchAccessHandler: WithRequirements<
+    Spec<AssignStaffBranchAccessHandler, 'scoped'>,
+    'request'
+  >;
 };
 
 const identityModule = defineBoundedContext<IdentityProvides>({
   name: 'Identity',
   commandDeps: [
     DI_TOKENS.IDENTITY.LOGIN_POS_STAFF_HANDLER,
+    DI_TOKENS.IDENTITY.SWITCH_POS_BRANCH_HANDLER,
     DI_TOKENS.IDENTITY.CREATE_STAFF_ROLE_HANDLER,
     DI_TOKENS.IDENTITY.UPDATE_STAFF_ROLE_HANDLER,
     DI_TOKENS.IDENTITY.DELETE_STAFF_ROLE_HANDLER,
-    DI_TOKENS.IDENTITY.ASSIGN_STAFF_ROLE_HANDLER,
+    DI_TOKENS.IDENTITY.ASSIGN_STAFF_BRANCH_ACCESS_HANDLER,
   ],
   queryDeps: [
     DI_TOKENS.IDENTITY.GET_CURRENT_ACTOR_HANDLER,
@@ -303,6 +336,16 @@ const identityModule = defineBoundedContext<IdentityProvides>({
           DI_TOKENS.IDENTITY.ROLE_PERMISSION_CACHE,
         ],
         'singleton',
+      )
+      .registerClass(
+        DI_TOKENS.IDENTITY.SWITCH_POS_BRANCH_HANDLER,
+        SwitchPosBranchHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.IDENTITY.ROLE_PERMISSION_CACHE,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
       )
       .registerClass(
         DI_TOKENS.IDENTITY.GET_ASSIGNABLE_PERMISSIONS_HANDLER,
@@ -361,10 +404,11 @@ const identityModule = defineBoundedContext<IdentityProvides>({
         'scoped',
       )
       .registerClass(
-        DI_TOKENS.IDENTITY.ASSIGN_STAFF_ROLE_HANDLER,
-        AssignStaffRoleHandler,
+        DI_TOKENS.IDENTITY.ASSIGN_STAFF_BRANCH_ACCESS_HANDLER,
+        AssignStaffBranchAccessHandler,
         [
           DI_TOKENS.CORE.DB,
+          DI_TOKENS.IDENTITY.ROLE_PERMISSION_CACHE,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
@@ -372,6 +416,7 @@ const identityModule = defineBoundedContext<IdentityProvides>({
       ),
   commands: (c, commandBus) => {
     commandBus.register('LoginPosStaff', c.get(DI_TOKENS.IDENTITY.LOGIN_POS_STAFF_HANDLER));
+    commandBus.register('SwitchPosBranch', c.get(DI_TOKENS.IDENTITY.SWITCH_POS_BRANCH_HANDLER));
     commandBus.register('CreateStaffRole', c.get(DI_TOKENS.IDENTITY.CREATE_STAFF_ROLE_HANDLER), {
       requiredPermission: 'staff:roles:manage',
     });
@@ -381,9 +426,13 @@ const identityModule = defineBoundedContext<IdentityProvides>({
     commandBus.register('DeleteStaffRole', c.get(DI_TOKENS.IDENTITY.DELETE_STAFF_ROLE_HANDLER), {
       requiredPermission: 'staff:roles:manage',
     });
-    commandBus.register('AssignStaffRole', c.get(DI_TOKENS.IDENTITY.ASSIGN_STAFF_ROLE_HANDLER), {
-      requiredPermission: 'staff:manage',
-    });
+    commandBus.register(
+      'AssignStaffBranchAccess',
+      c.get(DI_TOKENS.IDENTITY.ASSIGN_STAFF_BRANCH_ACCESS_HANDLER),
+      {
+        requiredPermission: 'staff:manage',
+      },
+    );
   },
   queries: (c, queryBus) => {
     queryBus.register('GetCurrentActor', c.get(DI_TOKENS.IDENTITY.GET_CURRENT_ACTOR_HANDLER));
@@ -411,10 +460,45 @@ const identityModule = defineBoundedContext<IdentityProvides>({
 
 type CatalogProvides = {
   catalogRepo: Spec<CatalogRepository, 'singleton'>;
-  getRestaurantsHandler: Spec<GetRestaurantsHandler, 'singleton'>;
-  getRestaurantBySubdomainHandler: Spec<GetRestaurantBySubdomainHandler, 'singleton'>;
-  getMenuSnapshotHandler: Spec<GetRestaurantMenuSnapshotHandler, 'singleton'>;
+  branchStatusCache: Spec<BranchStatusCache, 'singleton'>;
+  listBrandsHandler: Spec<ListBrandsHandler, 'singleton'>;
+  resolveBrandByHandleHandler: WithRequirements<
+    Spec<ResolveBrandByHandleHandler, 'scoped'>,
+    'request'
+  >;
+  resolveBranchBySlugHandler: WithRequirements<
+    Spec<ResolveBranchBySlugHandler, 'scoped'>,
+    'request'
+  >;
+  getMenuSnapshotHandler: Spec<GetBranchMenuSnapshotHandler, 'singleton'>;
   menuCacheHandler: Spec<MenuCacheInvalidationHandler, 'singleton'>;
+  registerBrandHandler: WithRequirements<Spec<RegisterBrandHandler, 'scoped'>, 'request'>;
+  createBrandBranchHandler: WithRequirements<Spec<CreateBrandBranchHandler, 'scoped'>, 'request'>;
+  updateBranchStatusHandler: WithRequirements<
+    Spec<UpdateBranchOperationalStatusHandler, 'scoped'>,
+    'request'
+  >;
+  updateBranchSettingsHandler: WithRequirements<
+    Spec<UpdateBranchSettingsHandler, 'scoped'>,
+    'request'
+  >;
+  reviewTakeawayWhitelistHandler: WithRequirements<
+    Spec<ReviewTakeawayWhitelistHandler, 'scoped'>,
+    'request'
+  >;
+  upsertPricingPolicyHandler: WithRequirements<
+    Spec<UpsertPricingPolicyHandler, 'scoped'>,
+    'request'
+  >;
+  upsertBranchMenuOverrideHandler: WithRequirements<
+    Spec<UpsertBranchMenuOverrideHandler, 'scoped'>,
+    'request'
+  >;
+  reviewPriceOverrideHandler: WithRequirements<
+    Spec<ReviewPriceOverrideHandler, 'scoped'>,
+    'request'
+  >;
+  createMenuItemHandler: WithRequirements<Spec<CreateMenuItemHandler, 'scoped'>, 'request'>;
   createRestaurantByAdminHandler: WithRequirements<
     Spec<CreateRestaurantByAdminHandler, 'scoped'>,
     'request'
@@ -429,13 +513,23 @@ type CatalogProvides = {
 const catalogModule = defineBoundedContext<CatalogProvides>({
   name: 'Catalog',
   commandDeps: [
+    DI_TOKENS.CATALOG.REGISTER_BRAND_HANDLER,
+    DI_TOKENS.CATALOG.CREATE_BRAND_BRANCH_HANDLER,
+    DI_TOKENS.CATALOG.UPDATE_BRANCH_STATUS_HANDLER,
+    DI_TOKENS.CATALOG.UPDATE_BRANCH_SETTINGS_HANDLER,
+    DI_TOKENS.CATALOG.REVIEW_TAKEAWAY_WHITELIST_HANDLER,
+    DI_TOKENS.CATALOG.UPSERT_PRICING_POLICY_HANDLER,
+    DI_TOKENS.CATALOG.UPSERT_BRANCH_MENU_OVERRIDE_HANDLER,
+    DI_TOKENS.CATALOG.REVIEW_PRICE_OVERRIDE_HANDLER,
+    DI_TOKENS.CATALOG.CREATE_MENU_ITEM_HANDLER,
     DI_TOKENS.CATALOG.CREATE_RESTAURANT_BY_ADMIN_HANDLER,
     DI_TOKENS.CATALOG.UPDATE_RESTAURANT_STATUS_BY_ADMIN_HANDLER,
     DI_TOKENS.CATALOG.UPDATE_ITEM_PRICE_HANDLER,
   ],
   queryDeps: [
-    DI_TOKENS.CATALOG.GET_RESTAURANTS_HANDLER,
-    DI_TOKENS.CATALOG.GET_RESTAURANT_BY_SUBDOMAIN_HANDLER,
+    DI_TOKENS.CATALOG.LIST_BRANDS_HANDLER,
+    DI_TOKENS.CATALOG.RESOLVE_BRAND_BY_HANDLE_HANDLER,
+    DI_TOKENS.CATALOG.RESOLVE_BRANCH_BY_SLUG_HANDLER,
     DI_TOKENS.CATALOG.GET_MENU_SNAPSHOT_HANDLER,
   ],
   module: (container) =>
@@ -449,24 +543,44 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
         'singleton',
       )
       .registerClass(
-        DI_TOKENS.CATALOG.GET_RESTAURANTS_HANDLER,
-        GetRestaurantsHandler,
+        DI_TOKENS.CATALOG.BRANCH_STATUS_CACHE,
+        BranchStatusCache,
+        [
+          DI_TOKENS.CORE.REDIS,
+        ],
+        'singleton',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.LIST_BRANDS_HANDLER,
+        ListBrandsHandler,
         [
           DI_TOKENS.CORE.DB,
         ],
         'singleton',
       )
       .registerClass(
-        DI_TOKENS.CATALOG.GET_RESTAURANT_BY_SUBDOMAIN_HANDLER,
-        GetRestaurantBySubdomainHandler,
+        DI_TOKENS.CATALOG.RESOLVE_BRAND_BY_HANDLE_HANDLER,
+        ResolveBrandByHandleHandler,
         [
           DI_TOKENS.CORE.DB,
+          DI_TOKENS.CATALOG.BRANCH_STATUS_CACHE,
+          DI_TOKENS.CORE.REQUEST,
         ],
-        'singleton',
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.RESOLVE_BRANCH_BY_SLUG_HANDLER,
+        ResolveBranchBySlugHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CATALOG.BRANCH_STATUS_CACHE,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
       )
       .registerClass(
         DI_TOKENS.CATALOG.GET_MENU_SNAPSHOT_HANDLER,
-        GetRestaurantMenuSnapshotHandler,
+        GetBranchMenuSnapshotHandler,
         [
           DI_TOKENS.CATALOG.REPO,
           DI_TOKENS.CORE.REDIS,
@@ -481,6 +595,99 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
           DI_TOKENS.CORE.REDIS,
         ],
         'singleton',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.REGISTER_BRAND_HANDLER,
+        RegisterBrandHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.CREATE_BRAND_BRANCH_HANDLER,
+        CreateBrandBranchHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.UPDATE_BRANCH_STATUS_HANDLER,
+        UpdateBranchOperationalStatusHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CATALOG.BRANCH_STATUS_CACHE,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.UPDATE_BRANCH_SETTINGS_HANDLER,
+        UpdateBranchSettingsHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.REVIEW_TAKEAWAY_WHITELIST_HANDLER,
+        ReviewTakeawayWhitelistHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.UPSERT_PRICING_POLICY_HANDLER,
+        UpsertPricingPolicyHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.UPSERT_BRANCH_MENU_OVERRIDE_HANDLER,
+        UpsertBranchMenuOverrideHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.REVIEW_PRICE_OVERRIDE_HANDLER,
+        ReviewPriceOverrideHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.CREATE_MENU_ITEM_HANDLER,
+        CreateMenuItemHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
       )
       .registerClass(
         DI_TOKENS.CATALOG.CREATE_RESTAURANT_BY_ADMIN_HANDLER,
@@ -514,6 +721,52 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
         'scoped',
       ),
   commands: (c, commandBus) => {
+    commandBus.register('RegisterBrand', c.get(DI_TOKENS.CATALOG.REGISTER_BRAND_HANDLER));
+    commandBus.register('CreateBrandBranch', c.get(DI_TOKENS.CATALOG.CREATE_BRAND_BRANCH_HANDLER), {
+      requiredPermission: 'brand:branches:create',
+    });
+    commandBus.register(
+      'UpdateBranchOperationalStatus',
+      c.get(DI_TOKENS.CATALOG.UPDATE_BRANCH_STATUS_HANDLER),
+      {
+        requiredPermission: 'branch:status:manage',
+      },
+    );
+    commandBus.register(
+      'UpdateBranchSettings',
+      c.get(DI_TOKENS.CATALOG.UPDATE_BRANCH_SETTINGS_HANDLER),
+      {
+        requiredPermission: 'branch:settings:manage',
+      },
+    );
+    commandBus.register(
+      'ReviewTakeawayWhitelist',
+      c.get(DI_TOKENS.CATALOG.REVIEW_TAKEAWAY_WHITELIST_HANDLER),
+      {
+        requiredPermission: 'branch:whitelist:manage',
+      },
+    );
+    commandBus.register(
+      'UpsertPricingPolicy',
+      c.get(DI_TOKENS.CATALOG.UPSERT_PRICING_POLICY_HANDLER),
+      {
+        requiredPermission: 'pricing:policy:manage',
+      },
+    );
+    commandBus.register(
+      'UpsertBranchMenuOverride',
+      c.get(DI_TOKENS.CATALOG.UPSERT_BRANCH_MENU_OVERRIDE_HANDLER),
+    );
+    commandBus.register(
+      'ReviewPriceOverride',
+      c.get(DI_TOKENS.CATALOG.REVIEW_PRICE_OVERRIDE_HANDLER),
+      {
+        requiredPermission: 'catalog:price:approve',
+      },
+    );
+    commandBus.register('CreateMenuItem', c.get(DI_TOKENS.CATALOG.CREATE_MENU_ITEM_HANDLER), {
+      requiredPermission: 'catalog:items:manage',
+    });
     commandBus.register(
       'CreateRestaurantByAdmin',
       c.get(DI_TOKENS.CATALOG.CREATE_RESTAURANT_BY_ADMIN_HANDLER),
@@ -532,16 +785,18 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
       requiredPermission: 'catalog:price:update',
     });
   },
+
   queries: (c, queryBus) => {
-    queryBus.register('GetRestaurants', c.get(DI_TOKENS.CATALOG.GET_RESTAURANTS_HANDLER));
+    queryBus.register('ListBrands', c.get(DI_TOKENS.CATALOG.LIST_BRANDS_HANDLER));
     queryBus.register(
-      'GetRestaurantBySubdomain',
-      c.get(DI_TOKENS.CATALOG.GET_RESTAURANT_BY_SUBDOMAIN_HANDLER),
+      'ResolveBrandByHandle',
+      c.get(DI_TOKENS.CATALOG.RESOLVE_BRAND_BY_HANDLE_HANDLER),
     );
     queryBus.register(
-      'GetRestaurantMenuSnapshot',
-      c.get(DI_TOKENS.CATALOG.GET_MENU_SNAPSHOT_HANDLER),
+      'ResolveBranchBySlug',
+      c.get(DI_TOKENS.CATALOG.RESOLVE_BRANCH_BY_SLUG_HANDLER),
     );
+    queryBus.register('GetBranchMenuSnapshot', c.get(DI_TOKENS.CATALOG.GET_MENU_SNAPSHOT_HANDLER));
   },
   subscribers: (scope, bus) => {
     scope.get(DI_TOKENS.CATALOG.MENU_CACHE_HANDLER).register(bus);
@@ -827,6 +1082,7 @@ export const rootContainer = domainContainer
     [
       DI_TOKENS.CORE.COMMAND_BUS,
       DI_TOKENS.CORE.QUERY_BUS,
+      DI_TOKENS.CORE.REQUEST,
     ],
     'scoped',
   )
@@ -865,6 +1121,7 @@ export interface ScopeServices {
   rolePermissionCache: RolePermissionCache;
   identityController: IdentityController;
   catalogRepo: CatalogRepository;
+  branchStatusCache: BranchStatusCache;
   menuCacheHandler: MenuCacheInvalidationHandler;
   catalogController: CatalogController;
   orderRepo: OrderRepository;

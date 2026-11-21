@@ -122,6 +122,95 @@ export const AggregateMementoTable: TableMeta<
   },
 } as const;
 
+export interface BranchMenuOverrideRow {
+  id: string;
+  branchId: string;
+  menuItemId: string;
+  isIncluded: boolean;
+  isAvailable: boolean;
+  priceOverride: string | null;
+  pendingPriceOverride: string | null;
+  approvalStatus: string;
+  requestedByStaffId: string | null;
+  reviewedByStaffId: string | null;
+  reviewNote: string | null;
+  rowVersion: number;
+  createdAt: Date;
+  createdBy: string | null;
+  updatedAt: Date;
+  updatedBy: string | null;
+  deletedAt: Date | null;
+  deletedBy: string | null;
+}
+
+export interface BranchMenuOverrideInsert {
+  id?: string;
+  branchId: string;
+  menuItemId: string;
+  isIncluded?: boolean;
+  isAvailable?: boolean;
+  priceOverride?: string | null;
+  pendingPriceOverride?: string | null;
+  approvalStatus?: string;
+  requestedByStaffId?: string | null;
+  reviewedByStaffId?: string | null;
+  reviewNote?: string | null;
+  rowVersion?: number;
+  createdAt?: Date;
+  createdBy?: string | null;
+  updatedAt?: Date;
+  updatedBy?: string | null;
+  deletedAt?: Date | null;
+  deletedBy?: string | null;
+}
+
+export const BranchMenuOverrideTable: TableMeta<
+  {
+    id: '"id"';
+    branchId: '"branchId"';
+    menuItemId: '"menuItemId"';
+    isIncluded: '"isIncluded"';
+    isAvailable: '"isAvailable"';
+    priceOverride: '"priceOverride"';
+    pendingPriceOverride: '"pendingPriceOverride"';
+    approvalStatus: '"approvalStatus"';
+    requestedByStaffId: '"requestedByStaffId"';
+    reviewedByStaffId: '"reviewedByStaffId"';
+    reviewNote: '"reviewNote"';
+    rowVersion: '"rowVersion"';
+    createdAt: '"createdAt"';
+    createdBy: '"createdBy"';
+    updatedAt: '"updatedAt"';
+    updatedBy: '"updatedBy"';
+    deletedAt: '"deletedAt"';
+    deletedBy: '"deletedBy"';
+  },
+  BranchMenuOverrideRow,
+  BranchMenuOverrideInsert
+> = {
+  table: '"BranchMenuOverride"',
+  cols: {
+    id: '"id"',
+    branchId: '"branchId"',
+    menuItemId: '"menuItemId"',
+    isIncluded: '"isIncluded"',
+    isAvailable: '"isAvailable"',
+    priceOverride: '"priceOverride"',
+    pendingPriceOverride: '"pendingPriceOverride"',
+    approvalStatus: '"approvalStatus"',
+    requestedByStaffId: '"requestedByStaffId"',
+    reviewedByStaffId: '"reviewedByStaffId"',
+    reviewNote: '"reviewNote"',
+    rowVersion: '"rowVersion"',
+    createdAt: '"createdAt"',
+    createdBy: '"createdBy"',
+    updatedAt: '"updatedAt"',
+    updatedBy: '"updatedBy"',
+    deletedAt: '"deletedAt"',
+    deletedBy: '"deletedBy"',
+  },
+} as const;
+
 export interface CategoryRow {
   id: string;
   restaurantId: string;
@@ -185,7 +274,6 @@ export const CategoryTable: TableMeta<
 
 export interface DiningTableRow {
   id: string;
-  restaurantId: string;
   tableNumber: string;
   zoneName: string;
   seatCapacity: number;
@@ -198,11 +286,11 @@ export interface DiningTableRow {
   updatedBy: string | null;
   deletedAt: Date | null;
   deletedBy: string | null;
+  branchId: string;
 }
 
 export interface DiningTableInsert {
   id?: string;
-  restaurantId: string;
   tableNumber: string;
   zoneName?: string;
   seatCapacity?: number;
@@ -215,12 +303,12 @@ export interface DiningTableInsert {
   updatedBy?: string | null;
   deletedAt?: Date | null;
   deletedBy?: string | null;
+  branchId: string;
 }
 
 export const DiningTableTable: TableMeta<
   {
     id: '"id"';
-    restaurantId: '"restaurantId"';
     tableNumber: '"tableNumber"';
     zoneName: '"zoneName"';
     seatCapacity: '"seatCapacity"';
@@ -233,6 +321,7 @@ export const DiningTableTable: TableMeta<
     updatedBy: '"updatedBy"';
     deletedAt: '"deletedAt"';
     deletedBy: '"deletedBy"';
+    branchId: '"branchId"';
   },
   DiningTableRow,
   DiningTableInsert
@@ -240,7 +329,6 @@ export const DiningTableTable: TableMeta<
   table: '"DiningTable"',
   cols: {
     id: '"id"',
-    restaurantId: '"restaurantId"',
     tableNumber: '"tableNumber"',
     zoneName: '"zoneName"',
     seatCapacity: '"seatCapacity"',
@@ -253,6 +341,7 @@ export const DiningTableTable: TableMeta<
     updatedBy: '"updatedBy"',
     deletedAt: '"deletedAt"',
     deletedBy: '"deletedBy"',
+    branchId: '"branchId"',
   },
 } as const;
 
@@ -519,7 +608,6 @@ export const ItemModifierTable: TableMeta<
 export interface LoyaltyLedgerRow {
   id: string;
   userId: string;
-  restaurantId: string | null;
   orderId: string | null;
   txType: string;
   pointsDelta: number;
@@ -530,12 +618,12 @@ export interface LoyaltyLedgerRow {
   updatedBy: string | null;
   deletedAt: Date | null;
   deletedBy: string | null;
+  branchId: string | null;
 }
 
 export interface LoyaltyLedgerInsert {
   id?: string;
   userId: string;
-  restaurantId?: string | null;
   orderId?: string | null;
   txType: string;
   pointsDelta: number;
@@ -546,13 +634,13 @@ export interface LoyaltyLedgerInsert {
   updatedBy?: string | null;
   deletedAt?: Date | null;
   deletedBy?: string | null;
+  branchId?: string | null;
 }
 
 export const LoyaltyLedgerTable: TableMeta<
   {
     id: '"id"';
     userId: '"userId"';
-    restaurantId: '"restaurantId"';
     orderId: '"orderId"';
     txType: '"txType"';
     pointsDelta: '"pointsDelta"';
@@ -563,6 +651,7 @@ export const LoyaltyLedgerTable: TableMeta<
     updatedBy: '"updatedBy"';
     deletedAt: '"deletedAt"';
     deletedBy: '"deletedBy"';
+    branchId: '"branchId"';
   },
   LoyaltyLedgerRow,
   LoyaltyLedgerInsert
@@ -571,7 +660,6 @@ export const LoyaltyLedgerTable: TableMeta<
   cols: {
     id: '"id"',
     userId: '"userId"',
-    restaurantId: '"restaurantId"',
     orderId: '"orderId"',
     txType: '"txType"',
     pointsDelta: '"pointsDelta"',
@@ -582,6 +670,7 @@ export const LoyaltyLedgerTable: TableMeta<
     updatedBy: '"updatedBy"',
     deletedAt: '"deletedAt"',
     deletedBy: '"deletedBy"',
+    branchId: '"branchId"',
   },
 } as const;
 
@@ -603,6 +692,8 @@ export interface MenuItemRow {
   updatedBy: string | null;
   deletedAt: Date | null;
   deletedBy: string | null;
+  branchId: string | null;
+  ingredientTags: string[];
 }
 
 export interface MenuItemInsert {
@@ -623,6 +714,8 @@ export interface MenuItemInsert {
   updatedBy?: string | null;
   deletedAt?: Date | null;
   deletedBy?: string | null;
+  branchId?: string | null;
+  ingredientTags?: string[];
 }
 
 export const MenuItemTable: TableMeta<
@@ -644,6 +737,8 @@ export const MenuItemTable: TableMeta<
     updatedBy: '"updatedBy"';
     deletedAt: '"deletedAt"';
     deletedBy: '"deletedBy"';
+    branchId: '"branchId"';
+    ingredientTags: '"ingredientTags"';
   },
   MenuItemRow,
   MenuItemInsert
@@ -667,12 +762,13 @@ export const MenuItemTable: TableMeta<
     updatedBy: '"updatedBy"',
     deletedAt: '"deletedAt"',
     deletedBy: '"deletedBy"',
+    branchId: '"branchId"',
+    ingredientTags: '"ingredientTags"',
   },
 } as const;
 
 export interface MenuSnapshotRow {
   id: string;
-  restaurantId: string;
   versionHash: string;
   serializedMenu: Record<string, unknown>;
   updatedAt: Date;
@@ -682,11 +778,11 @@ export interface MenuSnapshotRow {
   updatedBy: string | null;
   deletedAt: Date | null;
   deletedBy: string | null;
+  branchId: string;
 }
 
 export interface MenuSnapshotInsert {
   id?: string;
-  restaurantId: string;
   versionHash: string;
   serializedMenu: Record<string, unknown>;
   updatedAt?: Date;
@@ -696,12 +792,12 @@ export interface MenuSnapshotInsert {
   updatedBy?: string | null;
   deletedAt?: Date | null;
   deletedBy?: string | null;
+  branchId: string;
 }
 
 export const MenuSnapshotTable: TableMeta<
   {
     id: '"id"';
-    restaurantId: '"restaurantId"';
     versionHash: '"versionHash"';
     serializedMenu: '"serializedMenu"';
     updatedAt: '"updatedAt"';
@@ -711,6 +807,7 @@ export const MenuSnapshotTable: TableMeta<
     updatedBy: '"updatedBy"';
     deletedAt: '"deletedAt"';
     deletedBy: '"deletedBy"';
+    branchId: '"branchId"';
   },
   MenuSnapshotRow,
   MenuSnapshotInsert
@@ -718,7 +815,6 @@ export const MenuSnapshotTable: TableMeta<
   table: '"MenuSnapshot"',
   cols: {
     id: '"id"',
-    restaurantId: '"restaurantId"',
     versionHash: '"versionHash"',
     serializedMenu: '"serializedMenu"',
     updatedAt: '"updatedAt"',
@@ -728,12 +824,12 @@ export const MenuSnapshotTable: TableMeta<
     updatedBy: '"updatedBy"',
     deletedAt: '"deletedAt"',
     deletedBy: '"deletedBy"',
+    branchId: '"branchId"',
   },
 } as const;
 
 export interface OrderRow {
   id: string;
-  restaurantId: string;
   customerId: string | null;
   diningTableId: string | null;
   driverId: string | null;
@@ -751,11 +847,11 @@ export interface OrderRow {
   updatedBy: string | null;
   deletedAt: Date | null;
   deletedBy: string | null;
+  branchId: string;
 }
 
 export interface OrderInsert {
   id?: string;
-  restaurantId: string;
   customerId?: string | null;
   diningTableId?: string | null;
   driverId?: string | null;
@@ -773,12 +869,12 @@ export interface OrderInsert {
   updatedBy?: string | null;
   deletedAt?: Date | null;
   deletedBy?: string | null;
+  branchId: string;
 }
 
 export const OrderTable: TableMeta<
   {
     id: '"id"';
-    restaurantId: '"restaurantId"';
     customerId: '"customerId"';
     diningTableId: '"diningTableId"';
     driverId: '"driverId"';
@@ -796,6 +892,7 @@ export const OrderTable: TableMeta<
     updatedBy: '"updatedBy"';
     deletedAt: '"deletedAt"';
     deletedBy: '"deletedBy"';
+    branchId: '"branchId"';
   },
   OrderRow,
   OrderInsert
@@ -803,7 +900,6 @@ export const OrderTable: TableMeta<
   table: '"Order"',
   cols: {
     id: '"id"',
-    restaurantId: '"restaurantId"',
     customerId: '"customerId"',
     diningTableId: '"diningTableId"',
     driverId: '"driverId"',
@@ -821,6 +917,7 @@ export const OrderTable: TableMeta<
     updatedBy: '"updatedBy"',
     deletedAt: '"deletedAt"',
     deletedBy: '"deletedBy"',
+    branchId: '"branchId"',
   },
 } as const;
 
@@ -1129,6 +1226,91 @@ export const PaymentConfigTable: TableMeta<
   },
 } as const;
 
+export interface PricingPolicyRow {
+  id: string;
+  restaurantId: string;
+  branchId: string | null;
+  menuPricingMode: string;
+  maxDirectPriceDeltaPercent: string;
+  allowBranchLocalItems: boolean;
+  maxDirectOrderDiscountPercent: string;
+  allowFullCompWaiveOff: boolean;
+  requireReasonForCompOrDiscount: boolean;
+  maxDirectRefundAmount: string;
+  rowVersion: number;
+  createdAt: Date;
+  createdBy: string | null;
+  updatedAt: Date;
+  updatedBy: string | null;
+  deletedAt: Date | null;
+  deletedBy: string | null;
+}
+
+export interface PricingPolicyInsert {
+  id?: string;
+  restaurantId: string;
+  branchId?: string | null;
+  menuPricingMode?: string;
+  maxDirectPriceDeltaPercent?: string;
+  allowBranchLocalItems?: boolean;
+  maxDirectOrderDiscountPercent?: string;
+  allowFullCompWaiveOff?: boolean;
+  requireReasonForCompOrDiscount?: boolean;
+  maxDirectRefundAmount?: string;
+  rowVersion?: number;
+  createdAt?: Date;
+  createdBy?: string | null;
+  updatedAt?: Date;
+  updatedBy?: string | null;
+  deletedAt?: Date | null;
+  deletedBy?: string | null;
+}
+
+export const PricingPolicyTable: TableMeta<
+  {
+    id: '"id"';
+    restaurantId: '"restaurantId"';
+    branchId: '"branchId"';
+    menuPricingMode: '"menuPricingMode"';
+    maxDirectPriceDeltaPercent: '"maxDirectPriceDeltaPercent"';
+    allowBranchLocalItems: '"allowBranchLocalItems"';
+    maxDirectOrderDiscountPercent: '"maxDirectOrderDiscountPercent"';
+    allowFullCompWaiveOff: '"allowFullCompWaiveOff"';
+    requireReasonForCompOrDiscount: '"requireReasonForCompOrDiscount"';
+    maxDirectRefundAmount: '"maxDirectRefundAmount"';
+    rowVersion: '"rowVersion"';
+    createdAt: '"createdAt"';
+    createdBy: '"createdBy"';
+    updatedAt: '"updatedAt"';
+    updatedBy: '"updatedBy"';
+    deletedAt: '"deletedAt"';
+    deletedBy: '"deletedBy"';
+  },
+  PricingPolicyRow,
+  PricingPolicyInsert
+> = {
+  table: '"PricingPolicy"',
+  cols: {
+    id: '"id"',
+    restaurantId: '"restaurantId"',
+    branchId: '"branchId"',
+    menuPricingMode: '"menuPricingMode"',
+    maxDirectPriceDeltaPercent: '"maxDirectPriceDeltaPercent"',
+    allowBranchLocalItems: '"allowBranchLocalItems"',
+    maxDirectOrderDiscountPercent: '"maxDirectOrderDiscountPercent"',
+    allowFullCompWaiveOff: '"allowFullCompWaiveOff"',
+    requireReasonForCompOrDiscount: '"requireReasonForCompOrDiscount"',
+    maxDirectRefundAmount: '"maxDirectRefundAmount"',
+    rowVersion: '"rowVersion"',
+    createdAt: '"createdAt"',
+    createdBy: '"createdBy"',
+    updatedAt: '"updatedAt"',
+    updatedBy: '"updatedBy"',
+    deletedAt: '"deletedAt"',
+    deletedBy: '"deletedBy"',
+  },
+} as const;
+
 export interface PromotionRow {
   id: string;
   restaurantId: string | null;
@@ -1301,7 +1483,9 @@ export interface RestaurantRow {
   updatedBy: string | null;
   deletedAt: Date | null;
   deletedBy: string | null;
-  subdomain: string;
+  handle: string;
+  logoUrl: string | null;
+  description: string | null;
 }
 
 export interface RestaurantInsert {
@@ -1322,7 +1506,9 @@ export interface RestaurantInsert {
   updatedBy?: string | null;
   deletedAt?: Date | null;
   deletedBy?: string | null;
-  subdomain: string;
+  handle: string;
+  logoUrl?: string | null;
+  description?: string | null;
 }
 
 export const RestaurantTable: TableMeta<
@@ -1344,7 +1530,9 @@ export const RestaurantTable: TableMeta<
     updatedBy: '"updatedBy"';
     deletedAt: '"deletedAt"';
     deletedBy: '"deletedBy"';
-    subdomain: '"subdomain"';
+    handle: '"handle"';
+    logoUrl: '"logoUrl"';
+    description: '"description"';
   },
   RestaurantRow,
   RestaurantInsert
@@ -1368,7 +1556,166 @@ export const RestaurantTable: TableMeta<
     updatedBy: '"updatedBy"',
     deletedAt: '"deletedAt"',
     deletedBy: '"deletedBy"',
-    subdomain: '"subdomain"',
+    handle: '"handle"',
+    logoUrl: '"logoUrl"',
+    description: '"description"',
+  },
+} as const;
+
+export interface RestaurantBranchRow {
+  id: string;
+  restaurantId: string;
+  name: string;
+  branchKey: string;
+  city: string;
+  cityKey: string;
+  kitchenType: string;
+  postcodeSector: string;
+  streetAddress: string;
+  areaLocality: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  contactPersonName: string;
+  contactPersonPhone: string;
+  contactPersonEmail: string | null;
+  supportsDineIn: boolean;
+  supportsTakeaway: boolean;
+  supportsPlatformDelivery: boolean;
+  operationalStatus: string;
+  statusLockedUntil: Date | null;
+  statusReason: string | null;
+  scheduleConfig: Record<string, unknown>;
+  homePickupPrivacyMode: string;
+  dropPointConfig: Record<string, unknown> | null;
+  approvedTakeawayUserIds: Record<string, unknown>;
+  menuSelectionMode: string;
+  averagePrepTimeMinutes: number;
+  isActive: boolean;
+  rowVersion: number;
+  createdAt: Date;
+  createdBy: string | null;
+  updatedAt: Date;
+  updatedBy: string | null;
+  deletedAt: Date | null;
+  deletedBy: string | null;
+}
+
+export interface RestaurantBranchInsert {
+  id?: string;
+  restaurantId: string;
+  name: string;
+  branchKey: string;
+  city: string;
+  cityKey: string;
+  kitchenType?: string;
+  postcodeSector?: string;
+  streetAddress: string;
+  areaLocality?: string | null;
+  latitude?: string | null;
+  longitude?: string | null;
+  contactPersonName: string;
+  contactPersonPhone: string;
+  contactPersonEmail?: string | null;
+  supportsDineIn?: boolean;
+  supportsTakeaway?: boolean;
+  supportsPlatformDelivery?: boolean;
+  operationalStatus?: string;
+  statusLockedUntil?: Date | null;
+  statusReason?: string | null;
+  scheduleConfig?: Record<string, unknown>;
+  homePickupPrivacyMode?: string;
+  dropPointConfig?: Record<string, unknown> | null;
+  approvedTakeawayUserIds?: Record<string, unknown>;
+  menuSelectionMode?: string;
+  averagePrepTimeMinutes?: number;
+  isActive?: boolean;
+  rowVersion?: number;
+  createdAt?: Date;
+  createdBy?: string | null;
+  updatedAt?: Date;
+  updatedBy?: string | null;
+  deletedAt?: Date | null;
+  deletedBy?: string | null;
+}
+
+export const RestaurantBranchTable: TableMeta<
+  {
+    id: '"id"';
+    restaurantId: '"restaurantId"';
+    name: '"name"';
+    branchKey: '"branchKey"';
+    city: '"city"';
+    cityKey: '"cityKey"';
+    kitchenType: '"kitchenType"';
+    postcodeSector: '"postcodeSector"';
+    streetAddress: '"streetAddress"';
+    areaLocality: '"areaLocality"';
+    latitude: '"latitude"';
+    longitude: '"longitude"';
+    contactPersonName: '"contactPersonName"';
+    contactPersonPhone: '"contactPersonPhone"';
+    contactPersonEmail: '"contactPersonEmail"';
+    supportsDineIn: '"supportsDineIn"';
+    supportsTakeaway: '"supportsTakeaway"';
+    supportsPlatformDelivery: '"supportsPlatformDelivery"';
+    operationalStatus: '"operationalStatus"';
+    statusLockedUntil: '"statusLockedUntil"';
+    statusReason: '"statusReason"';
+    scheduleConfig: '"scheduleConfig"';
+    homePickupPrivacyMode: '"homePickupPrivacyMode"';
+    dropPointConfig: '"dropPointConfig"';
+    approvedTakeawayUserIds: '"approvedTakeawayUserIds"';
+    menuSelectionMode: '"menuSelectionMode"';
+    averagePrepTimeMinutes: '"averagePrepTimeMinutes"';
+    isActive: '"isActive"';
+    rowVersion: '"rowVersion"';
+    createdAt: '"createdAt"';
+    createdBy: '"createdBy"';
+    updatedAt: '"updatedAt"';
+    updatedBy: '"updatedBy"';
+    deletedAt: '"deletedAt"';
+    deletedBy: '"deletedBy"';
+  },
+  RestaurantBranchRow,
+  RestaurantBranchInsert
+> = {
+  table: '"RestaurantBranch"',
+  cols: {
+    id: '"id"',
+    restaurantId: '"restaurantId"',
+    name: '"name"',
+    branchKey: '"branchKey"',
+    city: '"city"',
+    cityKey: '"cityKey"',
+    kitchenType: '"kitchenType"',
+    postcodeSector: '"postcodeSector"',
+    streetAddress: '"streetAddress"',
+    areaLocality: '"areaLocality"',
+    latitude: '"latitude"',
+    longitude: '"longitude"',
+    contactPersonName: '"contactPersonName"',
+    contactPersonPhone: '"contactPersonPhone"',
+    contactPersonEmail: '"contactPersonEmail"',
+    supportsDineIn: '"supportsDineIn"',
+    supportsTakeaway: '"supportsTakeaway"',
+    supportsPlatformDelivery: '"supportsPlatformDelivery"',
+    operationalStatus: '"operationalStatus"',
+    statusLockedUntil: '"statusLockedUntil"',
+    statusReason: '"statusReason"',
+    scheduleConfig: '"scheduleConfig"',
+    homePickupPrivacyMode: '"homePickupPrivacyMode"',
+    dropPointConfig: '"dropPointConfig"',
+    approvedTakeawayUserIds: '"approvedTakeawayUserIds"',
+    menuSelectionMode: '"menuSelectionMode"',
+    averagePrepTimeMinutes: '"averagePrepTimeMinutes"',
+    isActive: '"isActive"',
+    rowVersion: '"rowVersion"',
+    createdAt: '"createdAt"',
+    createdBy: '"createdBy"',
+    updatedAt: '"updatedAt"',
+    updatedBy: '"updatedBy"',
+    deletedAt: '"deletedAt"',
+    deletedBy: '"deletedBy"',
   },
 } as const;
 
@@ -1386,6 +1733,7 @@ export interface RestaurantLayoutRow {
   updatedBy: string | null;
   deletedAt: Date | null;
   deletedBy: string | null;
+  galleryImages: Record<string, unknown>;
 }
 
 export interface RestaurantLayoutInsert {
@@ -1402,6 +1750,7 @@ export interface RestaurantLayoutInsert {
   updatedBy?: string | null;
   deletedAt?: Date | null;
   deletedBy?: string | null;
+  galleryImages?: Record<string, unknown>;
 }
 
 export const RestaurantLayoutTable: TableMeta<
@@ -1419,6 +1768,7 @@ export const RestaurantLayoutTable: TableMeta<
     updatedBy: '"updatedBy"';
     deletedAt: '"deletedAt"';
     deletedBy: '"deletedBy"';
+    galleryImages: '"galleryImages"';
   },
   RestaurantLayoutRow,
   RestaurantLayoutInsert
@@ -1438,6 +1788,7 @@ export const RestaurantLayoutTable: TableMeta<
     updatedBy: '"updatedBy"',
     deletedAt: '"deletedAt"',
     deletedBy: '"deletedBy"',
+    galleryImages: '"galleryImages"',
   },
 } as const;
 
@@ -1564,6 +1915,75 @@ export const SessionTable: TableMeta<
     createdAt: '"createdAt"',
     updatedAt: '"updatedAt"',
     impersonatedBy: '"impersonatedBy"',
+  },
+} as const;
+
+export interface StaffBranchAssignmentRow {
+  id: string;
+  staffId: string;
+  branchId: string;
+  staffRoleId: string;
+  directPermissions: string[];
+  isPrimary: boolean;
+  rowVersion: number;
+  createdAt: Date;
+  createdBy: string | null;
+  updatedAt: Date;
+  updatedBy: string | null;
+  deletedAt: Date | null;
+  deletedBy: string | null;
+}
+
+export interface StaffBranchAssignmentInsert {
+  id?: string;
+  staffId: string;
+  branchId: string;
+  staffRoleId: string;
+  directPermissions?: string[];
+  isPrimary?: boolean;
+  rowVersion?: number;
+  createdAt?: Date;
+  createdBy?: string | null;
+  updatedAt?: Date;
+  updatedBy?: string | null;
+  deletedAt?: Date | null;
+  deletedBy?: string | null;
+}
+
+export const StaffBranchAssignmentTable: TableMeta<
+  {
+    id: '"id"';
+    staffId: '"staffId"';
+    branchId: '"branchId"';
+    staffRoleId: '"staffRoleId"';
+    directPermissions: '"directPermissions"';
+    isPrimary: '"isPrimary"';
+    rowVersion: '"rowVersion"';
+    createdAt: '"createdAt"';
+    createdBy: '"createdBy"';
+    updatedAt: '"updatedAt"';
+    updatedBy: '"updatedBy"';
+    deletedAt: '"deletedAt"';
+    deletedBy: '"deletedBy"';
+  },
+  StaffBranchAssignmentRow,
+  StaffBranchAssignmentInsert
+> = {
+  table: '"StaffBranchAssignment"',
+  cols: {
+    id: '"id"',
+    staffId: '"staffId"',
+    branchId: '"branchId"',
+    staffRoleId: '"staffRoleId"',
+    directPermissions: '"directPermissions"',
+    isPrimary: '"isPrimary"',
+    rowVersion: '"rowVersion"',
+    createdAt: '"createdAt"',
+    createdBy: '"createdBy"',
+    updatedAt: '"updatedAt"',
+    updatedBy: '"updatedBy"',
+    deletedAt: '"deletedAt"',
+    deletedBy: '"deletedBy"',
   },
 } as const;
 

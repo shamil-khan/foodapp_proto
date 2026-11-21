@@ -4,9 +4,24 @@ import type { AppEnv, RequestContext } from '@/container';
 import type { CommandBus, QueryBus } from '@/core/application/cqrs';
 import { DomainError, type Result } from '@/core/domain/result';
 import type { ActiveActorProfileDto } from '@/identity/application/queries';
-import type { StaffRoleWithRightsDto } from '@/identity/application/role-queries';
+import type {
+  AssignableRightsResponseDto,
+  StaffRoleWithRightsDto,
+} from '@/identity/application/role-queries';
 import type { PosStaffSessionClaims } from '@/identity/domain/auth-actor';
 import { PosTokenService } from '@/identity/infrastructure/pos-token-service';
+
+function mapIdentityError(c: Context<AppEnv>, error: DomainError) {
+  const payload = {
+    code: error.code,
+    error: error.message,
+  };
+  if (error.statusCode === 401) return c.json(payload, 401);
+  if (error.statusCode === 403) return c.json(payload, 403);
+  if (error.statusCode === 404) return c.json(payload, 404);
+  if (error.statusCode === 409) return c.json(payload, 409);
+  return c.json(payload, 400);
+}
 
 export class IdentityController {
   private readonly posTokenService = new PosTokenService();
@@ -23,30 +38,17 @@ export class IdentityController {
   async loginPosStaff(
     c: Context<AppEnv>,
     body: {
-      subdomain: string;
+      brandHandle: string;
       email: string;
       password: string;
+      branchId?: string;
     },
   ) {
     const result = await this.commandBus.dispatch<Result<PosStaffSessionClaims, DomainError>>(
       'LoginPosStaff',
-      {
-        subdomain: body.subdomain,
-        email: body.email,
-        password: body.password,
-      },
+      body,
     );
-
-    if (!result.ok) {
-      const status = result.error.statusCode === 403 ? 403 : 401;
-      return c.json(
-        {
-          code: result.error.code,
-          error: result.error.message,
-        },
-        status,
-      );
-    }
+    if (!result.ok) return mapIdentityError(c, result.error);
 
     const token = await this.posTokenService.issueShiftSession(c, result.value);
     return c.json(
@@ -57,6 +59,40 @@ export class IdentityController {
           ...result.value,
           permissions: [
             ...result.value.permissions,
+          ],
+          assignedBranches: [
+            ...result.value.assignedBranches,
+          ],
+        },
+      },
+      200,
+    );
+  }
+
+  async switchPosBranch(
+    c: Context<AppEnv>,
+    body: {
+      targetBranchId: string;
+    },
+  ) {
+    const result = await this.commandBus.dispatch<Result<PosStaffSessionClaims, DomainError>>(
+      'SwitchPosBranch',
+      body,
+    );
+    if (!result.ok) return mapIdentityError(c, result.error);
+
+    const token = await this.posTokenService.issueShiftSession(c, result.value);
+    return c.json(
+      {
+        success: true as const,
+        token,
+        staff: {
+          ...result.value,
+          permissions: [
+            ...result.value.permissions,
+          ],
+          assignedBranches: [
+            ...result.value.assignedBranches,
           ],
         },
       },
@@ -76,7 +112,6 @@ export class IdentityController {
 
   async getCurrentActor(c: Context<AppEnv>) {
     const profile = await this.queryBus.ask<ActiveActorProfileDto | null>('GetCurrentActor', {});
-
     if (!profile) {
       return c.json(
         {
@@ -102,28 +137,23 @@ export class IdentityController {
 
   async listAssignablePermissions(c: Context<AppEnv>) {
     try {
-      const rights = await this.queryBus.ask<readonly TenantPermission[]>(
+      const data = await this.queryBus.ask<AssignableRightsResponseDto>(
         'GetAssignablePermissions',
         {},
       );
       return c.json(
         {
           rights: [
-            ...rights,
+            ...data.rights,
           ],
+          catalog: [
+            ...data.catalog,
+          ] as unknown as Record<string, unknown>[],
         },
         200,
       );
     } catch (error) {
-      if (error instanceof DomainError && error.statusCode === 403) {
-        return c.json(
-          {
-            code: error.code,
-            error: error.message,
-          },
-          403,
-        );
-      }
+      if (error instanceof DomainError) return mapIdentityError(c, error);
       throw error;
     }
   }
@@ -156,15 +186,7 @@ export class IdentityController {
         200,
       );
     } catch (error) {
-      if (error instanceof DomainError && error.statusCode === 403) {
-        return c.json(
-          {
-            code: error.code,
-            error: error.message,
-          },
-          403,
-        );
-      }
+      if (error instanceof DomainError) return mapIdentityError(c, error);
       throw error;
     }
   }
@@ -204,35 +226,7 @@ export class IdentityController {
       description: body.description,
       permissions: body.permissions,
     });
-
-    if (!result.ok) {
-      if (result.error.statusCode === 403) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          403,
-        );
-      }
-      if (result.error.statusCode === 409) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          409,
-        );
-      }
-      return c.json(
-        {
-          code: result.error.code,
-          error: result.error.message,
-        },
-        400,
-      );
-    }
-
+    if (!result.ok) return mapIdentityError(c, result.error);
     return c.json(result.value, 201);
   }
 
@@ -253,35 +247,7 @@ export class IdentityController {
       description: body.description,
       permissions: body.permissions,
     });
-
-    if (!result.ok) {
-      if (result.error.statusCode === 403) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          403,
-        );
-      }
-      if (result.error.statusCode === 404) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          404,
-        );
-      }
-      return c.json(
-        {
-          code: result.error.code,
-          error: result.error.message,
-        },
-        400,
-      );
-    }
-
+    if (!result.ok) return mapIdentityError(c, result.error);
     return c.json(
       {
         success: true as const,
@@ -299,44 +265,7 @@ export class IdentityController {
     const result = await this.commandBus.dispatch<Result<void, DomainError>>('DeleteStaffRole', {
       roleId: params.roleId,
     });
-
-    if (!result.ok) {
-      if (result.error.statusCode === 403) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          403,
-        );
-      }
-      if (result.error.statusCode === 404) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          404,
-        );
-      }
-      if (result.error.statusCode === 409) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          409,
-        );
-      }
-      return c.json(
-        {
-          code: result.error.code,
-          error: result.error.message,
-        },
-        400,
-      );
-    }
-
+    if (!result.ok) return mapIdentityError(c, result.error);
     return c.json(
       {
         success: true as const,
@@ -345,48 +274,40 @@ export class IdentityController {
     );
   }
 
-  async assignStaffRole(
+  async assignStaffBranchAccess(
     c: Context<AppEnv>,
     params: {
       staffId: string;
     },
     body: {
+      branchId?: string;
       roleId: string;
+      directPermissions?: TenantPermission[];
+      isPrimary?: boolean;
     },
   ) {
-    const result = await this.commandBus.dispatch<Result<void, DomainError>>('AssignStaffRole', {
-      staffId: params.staffId,
-      roleId: body.roleId,
-    });
-
-    if (!result.ok) {
-      if (result.error.statusCode === 403) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          403,
-        );
-      }
-      if (result.error.statusCode === 404) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          404,
-        );
-      }
+    const branchId = body.branchId ?? this.request.branchId;
+    if (!branchId) {
       return c.json(
         {
-          code: result.error.code,
-          error: result.error.message,
+          code: 'MISSING_BRANCH',
+          error: 'branchId is required',
         },
-        400,
+        403,
       );
     }
 
+    const result = await this.commandBus.dispatch<Result<void, DomainError>>(
+      'AssignStaffBranchAccess',
+      {
+        staffId: params.staffId,
+        branchId,
+        roleId: body.roleId,
+        directPermissions: body.directPermissions,
+        isPrimary: body.isPrimary,
+      },
+    );
+    if (!result.ok) return mapIdentityError(c, result.error);
     return c.json(
       {
         success: true as const,

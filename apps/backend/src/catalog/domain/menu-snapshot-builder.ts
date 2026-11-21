@@ -12,10 +12,13 @@ export interface SnapshotMenuItemDto {
   name: string;
   description: string | null;
   basePrice: number;
+  effectivePrice: number;
   vatRate: number;
   allergenFlags: string[];
+  ingredientTags: string[];
   kdsTarget: KdsRoutingTarget;
   imageUrl: string | null;
+  isBranchLocal: boolean;
   modifiers: SnapshotModifierDto[];
 }
 
@@ -28,23 +31,38 @@ export interface SnapshotCategoryDto {
 
 export interface CompiledMenuSnapshot {
   restaurantId: string;
-  restaurantName: string;
+  branchId: string;
+  brandName: string;
+  branchName: string;
   postcodeSector: string;
   versionHash: string;
   generatedAt: string;
   categories: SnapshotCategoryDto[];
 }
 
+/**
+ * GoF Builder Pattern: Assembles branch-compiled menu snapshots with branch overrides & tags.
+ */
 export class MenuSnapshotBuilder {
   private restaurantId = '';
-  private restaurantName = '';
+  private branchId = '';
+  private brandName = '';
+  private branchName = '';
   private postcodeSector = '';
   private readonly categories = new Map<string, SnapshotCategoryDto>();
 
-  setRestaurant(id: string, name: string, postcodeSector: string): this {
-    this.restaurantId = id;
-    this.restaurantName = name;
-    this.postcodeSector = postcodeSector;
+  setBranchContext(params: {
+    restaurantId: string;
+    branchId: string;
+    brandName: string;
+    branchName: string;
+    postcodeSector: string;
+  }): this {
+    this.restaurantId = params.restaurantId;
+    this.branchId = params.branchId;
+    this.brandName = params.brandName;
+    this.branchName = params.branchName;
+    this.postcodeSector = params.postcodeSector;
     return this;
   }
 
@@ -69,14 +87,13 @@ export class MenuSnapshotBuilder {
   }
 
   build(): CompiledMenuSnapshot {
-    const sortedCategories = Array.from(this.categories.values()).sort(
-      (a, b) => a.sortWeight - b.sortWeight,
-    );
+    const sortedCategories = Array.from(this.categories.values())
+      .filter((c) => c.items.length > 0)
+      .sort((a, b) => a.sortWeight - b.sortWeight);
 
     const payloadToHash = JSON.stringify({
       restaurantId: this.restaurantId,
-      restaurantName: this.restaurantName,
-      postcodeSector: this.postcodeSector,
+      branchId: this.branchId,
       categories: sortedCategories,
     });
 
@@ -88,7 +105,9 @@ export class MenuSnapshotBuilder {
 
     return {
       restaurantId: this.restaurantId,
-      restaurantName: this.restaurantName,
+      branchId: this.branchId,
+      brandName: this.brandName,
+      branchName: this.branchName,
       postcodeSector: this.postcodeSector,
       versionHash,
       generatedAt: new Date().toISOString(),

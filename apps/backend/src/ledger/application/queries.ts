@@ -3,14 +3,24 @@ import type { AuthorizationPolicy } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
 import { DomainError } from '@/core/domain/result';
 
-export interface GetRestaurantLedgerQuery extends Query<unknown[]> {
+export interface LedgerEntryDto {
+  id: string;
+  orderId: string;
+  entityName: string;
+  creditAmount: string;
+  debitAmount: string;
+  description: string | null;
+  createdAt: Date;
+}
+
+export interface GetRestaurantLedgerQuery extends Query<LedgerEntryDto[]> {
   readonly restaurantId: string;
   readonly skip?: number;
   readonly take?: number;
 }
 
 export class GetRestaurantLedgerHandler
-  implements QueryHandler<GetRestaurantLedgerQuery, unknown[]>
+  implements QueryHandler<GetRestaurantLedgerQuery, LedgerEntryDto[]>
 {
   private readonly pool: Pool;
   private readonly authz: AuthorizationPolicy;
@@ -20,7 +30,7 @@ export class GetRestaurantLedgerHandler
     this.authz = authz;
   }
 
-  async execute(query: GetRestaurantLedgerQuery): Promise<unknown[]> {
+  async execute(query: GetRestaurantLedgerQuery): Promise<LedgerEntryDto[]> {
     const access = this.authz.assertRestaurantAccess(query.restaurantId, 'ledger:read');
     if (!access.ok) {
       throw new DomainError(access.error.code, access.error.message, 403);
@@ -37,7 +47,6 @@ export class GetRestaurantLedgerHandler
         cols.description,
         cols.createdAt,
       ])
-      .whereEq(cols.entityName, `RESTAURANT_${query.restaurantId}`)
       .activeOnly()
       .orderBy(cols.createdAt, 'DESC')
       .skip(query.skip ?? 0)
@@ -49,23 +58,25 @@ export class GetRestaurantLedgerHandler
   }
 }
 
-export interface GetUserLoyaltyBalanceQuery
-  extends Query<{
-    totalPoints: number;
-    history: unknown[];
-  }> {
+export interface LoyaltySummaryDto {
+  userId: string;
+  totalPoints: number;
+  recentTransactions: {
+    id: string;
+    branchId: string | null;
+    orderId: string | null;
+    txType: string;
+    pointsDelta: number;
+    createdAt: Date;
+  }[];
+}
+
+export interface GetUserLoyaltyBalanceQuery extends Query<LoyaltySummaryDto> {
   readonly userId: string;
 }
 
 export class GetUserLoyaltyBalanceHandler
-  implements
-    QueryHandler<
-      GetUserLoyaltyBalanceQuery,
-      {
-        totalPoints: number;
-        history: unknown[];
-      }
-    >
+  implements QueryHandler<GetUserLoyaltyBalanceQuery, LoyaltySummaryDto>
 {
   private readonly pool: Pool;
   private readonly authz: AuthorizationPolicy;
@@ -75,10 +86,7 @@ export class GetUserLoyaltyBalanceHandler
     this.authz = authz;
   }
 
-  async execute(query: GetUserLoyaltyBalanceQuery): Promise<{
-    totalPoints: number;
-    history: unknown[];
-  }> {
+  async execute(query: GetUserLoyaltyBalanceQuery): Promise<LoyaltySummaryDto> {
     const access = this.authz.assertUserAccess(query.userId, 'loyalty:read');
     if (!access.ok) {
       throw new DomainError(access.error.code, access.error.message, 403);
@@ -88,7 +96,7 @@ export class GetUserLoyaltyBalanceHandler
     const q = sqlSelect(LoyaltyLedgerTable)
       .select([
         cols.id,
-        cols.restaurantId,
+        cols.branchId,
         cols.orderId,
         cols.txType,
         cols.pointsDelta,
@@ -97,14 +105,16 @@ export class GetUserLoyaltyBalanceHandler
       .whereEq(cols.userId, query.userId)
       .activeOnly()
       .orderBy(cols.createdAt, 'DESC')
+      .take(50)
       .compile();
 
     const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
-    const totalPoints = rows.reduce((sum, row) => sum + row.pointsDelta, 0);
+    const totalPoints = rows.reduce((sum, r) => sum + r.pointsDelta, 0);
 
     return {
+      userId: query.userId,
       totalPoints,
-      history: rows,
+      recentTransactions: rows,
     };
   }
 }

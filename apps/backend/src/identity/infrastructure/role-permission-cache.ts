@@ -3,6 +3,7 @@ import {
   type Permission,
   type Pool,
   type redisClient,
+  StaffBranchAssignmentTable,
   StaffRolePermissionTable,
   StaffRoleTable,
   sqlSelect,
@@ -24,6 +25,10 @@ export class RolePermissionCache {
 
   private keyForRole(roleId: string): string {
     return `role:perms:${roleId}`;
+  }
+
+  private keyForStaffBranch(staffId: string, branchId: string): string {
+    return `staff:branch:perms:${staffId}:${branchId}`;
   }
 
   async getPermissionsForRole(roleId: string): Promise<readonly Permission[]> {
@@ -80,10 +85,68 @@ export class RolePermissionCache {
     return permissions;
   }
 
+  async getEffectivePermissionsForStaffBranch(
+    staffId: string,
+    branchId: string,
+  ): Promise<readonly Permission[]> {
+    const cacheKey = this.keyForStaffBranch(staffId, branchId);
+    if (!this.redis.isOpen) {
+      await this.redis.connect();
+    }
+
+    const cached = await this.redis.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached) as Permission[];
+    }
+
+    const aCols = StaffBranchAssignmentTable.cols;
+    const assignQuery = sqlSelect(StaffBranchAssignmentTable)
+      .select([
+        aCols.staffRoleId,
+        aCols.directPermissions,
+      ])
+      .whereEq(aCols.staffId, staffId)
+      .whereEq(aCols.branchId, branchId)
+      .activeOnly()
+      .compile();
+
+    const { rows } = await this.pool.query<typeof assignQuery._result>(
+      assignQuery.text,
+      assignQuery.params,
+    );
+    const assignment = rows[0];
+    if (!assignment) {
+      return [];
+    }
+
+    const rolePerms = await this.getPermissionsForRole(assignment.staffRoleId);
+    const directPerms = (assignment.directPermissions ?? []).filter((p): p is Permission =>
+      ALLOWED_PERMISSION_SET.has(p),
+    );
+    const effective = Array.from(
+      new Set<Permission>([
+        ...rolePerms,
+        ...directPerms,
+      ]),
+    );
+
+    await this.redis.set(cacheKey, JSON.stringify(effective), {
+      EX: RolePermissionCache.TTL_SECONDS,
+    });
+    return effective;
+  }
+
   async invalidateRole(roleId: string): Promise<void> {
     if (!this.redis.isOpen) {
       await this.redis.connect();
     }
     await this.redis.del(this.keyForRole(roleId));
+  }
+
+  async invalidateStaffBranch(staffId: string, branchId: string): Promise<void> {
+    if (!this.redis.isOpen) {
+      await this.redis.connect();
+    }
+    await this.redis.del(this.keyForStaffBranch(staffId, branchId));
   }
 }

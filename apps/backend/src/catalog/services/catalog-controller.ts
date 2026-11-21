@@ -1,219 +1,326 @@
 import type { Context } from 'hono';
-import type { StorefrontRestaurantDto } from '@/catalog/application/queries';
+import type {
+  BrandStorefrontResponseDto,
+  StorefrontBranchDto,
+  StorefrontBrandDto,
+} from '@/catalog/application/queries';
 import type { CompiledMenuSnapshot } from '@/catalog/domain/menu-snapshot-builder';
-import type { AppEnv } from '@/container';
+import type { AppEnv, RequestContext } from '@/container';
 import type { CommandBus, QueryBus } from '@/core/application/cqrs';
 import type { DomainError, Result } from '@/core/domain/result';
+
+function mapDomainError(c: Context<AppEnv>, error: DomainError) {
+  const payload = {
+    code: error.code,
+    error: error.message,
+  };
+  if (error.statusCode === 403) return c.json(payload, 403);
+  if (error.statusCode === 404) return c.json(payload, 404);
+  if (error.statusCode === 409) return c.json(payload, 409);
+  return c.json(payload, 400);
+}
 
 export class CatalogController {
   private readonly commandBus: CommandBus;
   private readonly queryBus: QueryBus;
+  private readonly request: RequestContext;
 
-  constructor(commandBus: CommandBus, queryBus: QueryBus) {
+  constructor(commandBus: CommandBus, queryBus: QueryBus, request: RequestContext) {
     this.commandBus = commandBus;
     this.queryBus = queryBus;
+    this.request = request;
   }
 
-  async listRestaurants(
+  async listBrands(
     c: Context<AppEnv>,
     query: {
-      postcodeSector?: string;
       search?: string;
       skip?: number;
       take?: number;
     },
   ) {
-    const restaurants = await this.queryBus.ask<StorefrontRestaurantDto[]>('GetRestaurants', {
-      postcodeSector: query.postcodeSector,
-      search: query.search,
-      skip: query.skip ?? 0,
-      take: query.take ?? 20,
-    });
-
+    const brands = await this.queryBus.ask<StorefrontBrandDto[]>('ListBrands', query);
     return c.json(
       {
-        restaurants,
+        brands,
       },
       200,
     );
   }
 
-  async getRestaurantBySubdomain(
-    c: Context<AppEnv>,
-    params: {
-      subdomain: string;
-    },
-  ) {
-    const restaurant = await this.queryBus.ask<StorefrontRestaurantDto | null>(
-      'GetRestaurantBySubdomain',
-      {
-        subdomain: params.subdomain,
-      },
+  async registerBrand(c: Context<AppEnv>, body: Record<string, unknown>) {
+    const result = await this.commandBus.dispatch<Result<Record<string, unknown>, DomainError>>(
+      'RegisterBrand',
+      body,
     );
-
-    if (!restaurant) {
-      return c.json(
-        {
-          code: 'NOT_FOUND',
-          error: 'Restaurant not found or suspended',
-        },
-        404,
-      );
-    }
-
-    return c.json(
-      {
-        restaurant,
-      },
-      200,
-    );
-  }
-
-  async getMenuSnapshot(
-    c: Context<AppEnv>,
-    params: {
-      restaurantId: string;
-    },
-  ) {
-    const snapshot = await this.queryBus.ask<CompiledMenuSnapshot | null>(
-      'GetRestaurantMenuSnapshot',
-      {
-        restaurantId: params.restaurantId,
-      },
-    );
-
-    if (!snapshot) {
-      return c.json(
-        {
-          error: 'Restaurant menu not found',
-        },
-        404,
-      );
-    }
-
-    return c.json(snapshot, 200);
-  }
-
-  async updateItemPrice(
-    c: Context<AppEnv>,
-    params: {
-      itemId: string;
-    },
-    body: {
-      newBasePrice: number;
-      expectedRowVersion: number;
-    },
-  ) {
-    const result = await this.commandBus.dispatch<Result<void, DomainError>>(
-      'UpdateMenuItemPrice',
-      {
-        menuItemId: params.itemId,
-        newBasePrice: body.newBasePrice,
-        expectedRowVersion: body.expectedRowVersion,
-      },
-    );
-
-    if (!result.ok) {
-      if (result.error.statusCode === 403) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          403,
-        );
-      }
-      if (result.error.statusCode === 404) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          404,
-        );
-      }
-      if (result.error.statusCode === 409) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          409,
-        );
-      }
-      return c.json(
-        {
-          code: result.error.code,
-          error: result.error.message,
-        },
-        400,
-      );
-    }
-
-    return c.json(
-      {
-        success: true as const,
-        menuItemId: params.itemId,
-      },
-      200,
-    );
-  }
-
-  async createRestaurantByAdmin(
-    c: Context<AppEnv>,
-    body: {
-      name: string;
-      subdomain: string;
-      postcodeSector: string;
-      ownerName: string;
-      ownerEmail: string;
-      ownerPassword: string;
-      platformFeeRate?: number;
-    },
-  ) {
-    const result = await this.commandBus.dispatch<
-      Result<
-        {
-          restaurantId: string;
-          subdomain: string;
-          ownerStaffId: string;
-        },
-        DomainError
-      >
-    >('CreateRestaurantByAdmin', body);
-
-    if (!result.ok) {
-      if (result.error.statusCode === 403) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          403,
-        );
-      }
-      if (result.error.statusCode === 409) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          409,
-        );
-      }
-      return c.json(
-        {
-          code: result.error.code,
-          error: result.error.message,
-        },
-        400,
-      );
-    }
-
+    if (!result.ok) return mapDomainError(c, result.error);
     return c.json(result.value, 201);
   }
 
-  async updateRestaurantStatusByAdmin(
+  async resolveBrandByHandle(
+    c: Context<AppEnv>,
+    params: {
+      brand: string;
+    },
+  ) {
+    const resolved = await this.queryBus.ask<BrandStorefrontResponseDto | null>(
+      'ResolveBrandByHandle',
+      {
+        brandHandle: params.brand,
+      },
+    );
+    if (!resolved)
+      return c.json(
+        {
+          code: 'NOT_FOUND',
+          error: 'Brand not found or suspended',
+        },
+        404,
+      );
+    return c.json(resolved, 200);
+  }
+
+  async resolveBranchBySlug(
+    c: Context<AppEnv>,
+    params: {
+      brand: string;
+      city: string;
+      branch: string;
+    },
+  ) {
+    const resolved = await this.queryBus.ask<{
+      brand: StorefrontBrandDto;
+      branch: StorefrontBranchDto;
+    } | null>('ResolveBranchBySlug', {
+      brandHandle: params.brand,
+      city: params.city,
+      branch: params.branch,
+    });
+    if (!resolved)
+      return c.json(
+        {
+          code: 'NOT_FOUND',
+          error: 'Branch not found',
+        },
+        404,
+      );
+    return c.json(resolved, 200);
+  }
+
+  async getBranchMenuSnapshot(
+    c: Context<AppEnv>,
+    params: {
+      branchId: string;
+    },
+    query: {
+      tag?: string;
+    },
+  ) {
+    const snapshot = await this.queryBus.ask<CompiledMenuSnapshot | null>('GetBranchMenuSnapshot', {
+      branchId: params.branchId,
+      tag: query.tag,
+    });
+    if (!snapshot)
+      return c.json(
+        {
+          code: 'NOT_FOUND',
+          error: 'Branch menu not found',
+        },
+        404,
+      );
+    return c.json(snapshot, 200);
+  }
+
+  async createBrandBranch(c: Context<AppEnv>, body: Record<string, unknown>) {
+    const restaurantId = (body.restaurantId as string | undefined) ?? this.request.restaurantId;
+    if (!restaurantId)
+      return c.json(
+        {
+          code: 'MISSING_TENANT',
+          error: 'restaurantId is required',
+        },
+        403,
+      );
+    const result = await this.commandBus.dispatch<Result<Record<string, unknown>, DomainError>>(
+      'CreateBrandBranch',
+      {
+        ...body,
+        restaurantId,
+      },
+    );
+    if (!result.ok) return mapDomainError(c, result.error);
+    return c.json(result.value, 201);
+  }
+
+  async updateBranchStatus(
+    c: Context<AppEnv>,
+    params: {
+      branchId: string;
+    },
+    body: Record<string, unknown>,
+  ) {
+    const result = await this.commandBus.dispatch<Result<Record<string, unknown>, DomainError>>(
+      'UpdateBranchOperationalStatus',
+      {
+        branchId: params.branchId,
+        ...body,
+      },
+    );
+    if (!result.ok) return mapDomainError(c, result.error);
+    return c.json(result.value, 200);
+  }
+
+  async updateBranchSettings(
+    c: Context<AppEnv>,
+    params: {
+      branchId: string;
+    },
+    body: Record<string, unknown>,
+  ) {
+    const result = await this.commandBus.dispatch<Result<void, DomainError>>(
+      'UpdateBranchSettings',
+      {
+        branchId: params.branchId,
+        ...body,
+      },
+    );
+    if (!result.ok) return mapDomainError(c, result.error);
+    return c.json(
+      {
+        success: true as const,
+      },
+      200,
+    );
+  }
+
+  async reviewWhitelist(
+    c: Context<AppEnv>,
+    params: {
+      branchId: string;
+    },
+    body: Record<string, unknown>,
+  ) {
+    const result = await this.commandBus.dispatch<Result<void, DomainError>>(
+      'ReviewTakeawayWhitelist',
+      {
+        branchId: params.branchId,
+        ...body,
+      },
+    );
+    if (!result.ok) return mapDomainError(c, result.error);
+    return c.json(
+      {
+        success: true as const,
+      },
+      200,
+    );
+  }
+
+  async upsertPricingPolicy(c: Context<AppEnv>, body: Record<string, unknown>) {
+    const restaurantId = (body.restaurantId as string | undefined) ?? this.request.restaurantId;
+    if (!restaurantId)
+      return c.json(
+        {
+          code: 'MISSING_TENANT',
+          error: 'restaurantId is required',
+        },
+        403,
+      );
+    const result = await this.commandBus.dispatch<Result<void, DomainError>>(
+      'UpsertPricingPolicy',
+      {
+        ...body,
+        restaurantId,
+      },
+    );
+    if (!result.ok) return mapDomainError(c, result.error);
+    return c.json(
+      {
+        success: true as const,
+      },
+      200,
+    );
+  }
+
+  async upsertBranchMenuOverride(
+    c: Context<AppEnv>,
+    params: {
+      branchId: string;
+      itemId: string;
+    },
+    body: Record<string, unknown>,
+  ) {
+    const result = await this.commandBus.dispatch<Result<Record<string, unknown>, DomainError>>(
+      'UpsertBranchMenuOverride',
+      {
+        branchId: params.branchId,
+        menuItemId: params.itemId,
+        ...body,
+      },
+    );
+    if (!result.ok) return mapDomainError(c, result.error);
+    return c.json(result.value, 200);
+  }
+
+  async reviewPriceOverride(
+    c: Context<AppEnv>,
+    params: {
+      branchId: string;
+      itemId: string;
+    },
+    body: Record<string, unknown>,
+  ) {
+    const result = await this.commandBus.dispatch<Result<void, DomainError>>(
+      'ReviewPriceOverride',
+      {
+        branchId: params.branchId,
+        menuItemId: params.itemId,
+        ...body,
+      },
+    );
+    if (!result.ok) return mapDomainError(c, result.error);
+    return c.json(
+      {
+        success: true as const,
+      },
+      200,
+    );
+  }
+
+  async createMenuItem(c: Context<AppEnv>, body: Record<string, unknown>) {
+    const restaurantId = (body.restaurantId as string | undefined) ?? this.request.restaurantId;
+    if (!restaurantId)
+      return c.json(
+        {
+          code: 'MISSING_TENANT',
+          error: 'restaurantId is required',
+        },
+        403,
+      );
+    const result = await this.commandBus.dispatch<Result<Record<string, unknown>, DomainError>>(
+      'CreateMenuItem',
+      {
+        ...body,
+        restaurantId,
+      },
+    );
+    if (!result.ok) return mapDomainError(c, result.error);
+    return c.json(result.value, 201);
+  }
+
+  async createBrandByAdmin(c: Context<AppEnv>, body: Record<string, unknown>) {
+    const result = await this.commandBus.dispatch<Result<Record<string, unknown>, DomainError>>(
+      'CreateRestaurantByAdmin',
+      {
+        name: body.brandName,
+        ...body,
+      },
+    );
+    if (!result.ok) return mapDomainError(c, result.error);
+    return c.json(result.value, 201);
+  }
+
+  async updateBrandStatusByAdmin(
     c: Context<AppEnv>,
     params: {
       restaurantId: string;
@@ -229,35 +336,7 @@ export class CatalogController {
         isActive: body.isActive,
       },
     );
-
-    if (!result.ok) {
-      if (result.error.statusCode === 403) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          403,
-        );
-      }
-      if (result.error.statusCode === 404) {
-        return c.json(
-          {
-            code: result.error.code,
-            error: result.error.message,
-          },
-          404,
-        );
-      }
-      return c.json(
-        {
-          code: result.error.code,
-          error: result.error.message,
-        },
-        400,
-      );
-    }
-
+    if (!result.ok) return mapDomainError(c, result.error);
     return c.json(
       {
         success: true as const,

@@ -6,6 +6,7 @@ import type { EventBus } from '@/core/application/event-bus';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
 
 export interface UpdateMenuItemPriceCommand extends Command<Result<void>> {
+  readonly branchId: string;
   readonly menuItemId: string;
   readonly newBasePrice: number;
   readonly expectedRowVersion: number;
@@ -41,19 +42,19 @@ export class UpdateMenuItemPriceHandler
       return err(new DomainError('ITEM_NOT_FOUND', 'Menu item does not exist.', 404));
     }
 
-    const access = this.authz.assertRestaurantAccess(ownerRestaurantId, 'catalog:price:update');
+    const access = this.authz.assertBranchAccess(cmd.branchId, 'catalog:price:update');
     if (!access.ok) {
       return access;
     }
 
-    const { updated, restaurantId } = await this.catalogRepo.updateItemPrice({
+    const { updated } = await this.catalogRepo.updateItemPrice({
       menuItemId: cmd.menuItemId,
       newBasePrice: cmd.newBasePrice,
       expectedRowVersion: cmd.expectedRowVersion,
       actorId: this.request.actorId,
     });
 
-    if (!updated || !restaurantId) {
+    if (!updated) {
       return err(
         new DomainError(
           'CONCURRENCY_CONFLICT',
@@ -66,20 +67,20 @@ export class UpdateMenuItemPriceHandler
     await this.eventBus.publish([
       {
         eventId: crypto.randomUUID(),
-        aggregateId: restaurantId,
-        aggregateType: 'RestaurantCatalog',
-        eventType: 'RestaurantMenuUpdated',
+        aggregateId: cmd.branchId,
+        aggregateType: 'BranchCatalog',
+        eventType: 'BranchMenuUpdated',
         version: 1,
         occurredAt: new Date(),
         payload: {
-          restaurantId,
+          branchId: cmd.branchId,
           menuItemId: cmd.menuItemId,
           newBasePrice: cmd.newBasePrice,
         },
         metadata: {
           requestId: this.request.requestId,
           actorId: this.request.actorId,
-          restaurantId,
+          restaurantId: ownerRestaurantId,
         },
       },
     ]);

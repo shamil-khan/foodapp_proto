@@ -31,15 +31,20 @@ export const initDiScope = inferdiHono<
     const posClaims = await posTokenService.verifyRequestToken(c);
     if (posClaims) {
       const roleCache: RolePermissionCache = root.get('rolePermissionCache');
-      const livePermissions = posClaims.roleId
-        ? await roleCache.getPermissionsForRole(posClaims.roleId)
-        : posClaims.permissions;
+      const livePermissions =
+        posClaims.staffId && posClaims.activeBranchId
+          ? await roleCache.getEffectivePermissionsForStaffBranch(
+              posClaims.staffId,
+              posClaims.activeBranchId,
+            )
+          : posClaims.permissions;
 
       context = {
         requestId,
         actorId: posClaims.staffId,
         actorSource: 'POS_STAFF',
         restaurantId: posClaims.restaurantId,
+        branchId: posClaims.activeBranchId,
         roleId: posClaims.roleId,
         tenantRole: posClaims.role,
         permissions: resolveDefaultPermissionsForActor({

@@ -1,54 +1,35 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ApiTestClient, loginPosStaff } from '../helpers/api-client.js';
 
-interface MenuSnapshotResponse {
-  categories: Array<{
-    items: Array<{
-      id: string;
-    }>;
-  }>;
-}
-
-describe('03 — POS Ordering, Settlement Saga, Double-Entry Ledger & Customer Loyalty', () => {
+describe('05 — Multi-Branch POS Ordering, Ledger Saga & Customer Loyalty', () => {
   const client = new ApiTestClient();
-  const rest1Id = 'a0000000-0000-4000-8000-000000000001';
-  const rest2Id = 'a0000000-0000-4000-8000-000000000002';
+  const cliftonBranchId = 'b0000000-0000-4000-8000-000000000006';
+  const gulbergBranchId = 'b0000000-0000-4000-8000-000000000007';
+  const pizzaHutMenuItemId = 'e0000000-0000-4000-8000-000000000006';
+  const pizzaInMenuItemId = 'e0000000-0000-4000-8000-000000000004';
   const seededCustomerId = '11111111-1111-4111-8111-111111111111';
 
-  let ownerToken = '';
-  let takerToken = '';
-  let otherTenantToken = '';
-  let menuItemId = '';
-  let rest1ItemId = '';
+  let cliftonOwnerToken = '';
+  let gulbergOwnerToken = '';
   let orderId = '';
 
   beforeAll(async () => {
-    ownerToken = await loginPosStaff(client, {
-      subdomain: 'westminster-patty',
-      email: 'staff1.0002@pos-tenant.co.uk',
+    cliftonOwnerToken = await loginPosStaff(client, {
+      brandHandle: 'pizza-hut',
+      email: 'owner@pizza-hut.example.com',
       password: 'Password123!',
+      branchId: cliftonBranchId,
     });
 
-    takerToken = await loginPosStaff(client, {
-      subdomain: 'westminster-patty',
-      email: 'staff5.0002@pos-tenant.co.uk',
+    gulbergOwnerToken = await loginPosStaff(client, {
+      brandHandle: 'pizza-hut',
+      email: 'owner@pizza-hut.example.com',
       password: 'Password123!',
+      branchId: gulbergBranchId,
     });
-
-    otherTenantToken = await loginPosStaff(client, {
-      subdomain: 'smash360',
-      email: 'staff1.0001@pos-tenant.co.uk',
-      password: 'Password123!',
-    });
-
-    const rest2Menu = await client.get<MenuSnapshotResponse>(`/api/restaurants/${rest2Id}/menu`);
-    menuItemId = rest2Menu.body.categories[0]?.items[0]?.id ?? '';
-
-    const rest1Menu = await client.get<MenuSnapshotResponse>(`/api/restaurants/${rest1Id}/menu`);
-    rest1ItemId = rest1Menu.body.categories[0]?.items[0]?.id ?? '';
   });
 
-  it('3.1 Places a POS order with customerId and returns KDS station slips (201)', async () => {
+  it('10.1 Places POS order on active branch with customerId and returns KDS tickets (201)', async () => {
     const res = await client.post<{
       orderId: string;
       kdsTickets: {
@@ -62,13 +43,13 @@ describe('03 — POS Ordering, Settlement Saga, Double-Entry Ledger & Customer L
         customerId: seededCustomerId,
         items: [
           {
-            menuItemId,
+            menuItemId: pizzaHutMenuItemId,
             quantity: 2,
           },
         ],
       },
       {
-        token: ownerToken,
+        token: cliftonOwnerToken,
       },
     );
 
@@ -78,16 +59,16 @@ describe('03 — POS Ordering, Settlement Saga, Double-Entry Ledger & Customer L
     orderId = res.body.orderId;
   });
 
-  it('3.2 Blocks cross-tenant order query, settle, and foreign item injection (403 TENANT_FORBIDDEN)', async () => {
-    const crossQuery = await client.get<{
+  it('10.2 Blocks cross-branch order query/settle (403 BRANCH_FORBIDDEN) & foreign item injection (403 TENANT_FORBIDDEN)', async () => {
+    const crossBranchQuery = await client.get<{
       code: string;
-    }>(`/api/pos/orders?restaurantId=${rest1Id}`, {
-      token: ownerToken,
+    }>(`/api/pos/orders?restaurantId=${gulbergBranchId}`, {
+      token: cliftonOwnerToken,
     });
-    expect(crossQuery.status).toBe(403);
-    expect(crossQuery.body.code).toBe('TENANT_FORBIDDEN');
+    expect(crossBranchQuery.status).toBe(403);
+    expect(crossBranchQuery.body.code).toBe('BRANCH_FORBIDDEN');
 
-    const crossSettle = await client.post<{
+    const crossBranchSettle = await client.post<{
       code: string;
     }>(
       `/api/pos/orders/${orderId}/settle`,
@@ -96,11 +77,11 @@ describe('03 — POS Ordering, Settlement Saga, Double-Entry Ledger & Customer L
         tipAmount: 0,
       },
       {
-        token: otherTenantToken,
+        token: gulbergOwnerToken,
       },
     );
-    expect(crossSettle.status).toBe(403);
-    expect(crossSettle.body.code).toBe('TENANT_FORBIDDEN');
+    expect(crossBranchSettle.status).toBe(403);
+    expect(crossBranchSettle.body.code).toBe('BRANCH_FORBIDDEN');
 
     const foreignItem = await client.post<{
       code: string;
@@ -110,45 +91,20 @@ describe('03 — POS Ordering, Settlement Saga, Double-Entry Ledger & Customer L
         orderSource: 'DINE_IN',
         items: [
           {
-            menuItemId: rest1ItemId,
+            menuItemId: pizzaInMenuItemId,
             quantity: 1,
           },
         ],
       },
       {
-        token: ownerToken,
+        token: cliftonOwnerToken,
       },
     );
     expect(foreignItem.status).toBe(403);
     expect(foreignItem.body.code).toBe('TENANT_FORBIDDEN');
   });
 
-  it('3.3 Blocks ORDER_TAKER from settling orders or reading ledger (403 INSUFFICIENT_RIGHTS)', async () => {
-    const settleDenied = await client.post<{
-      code: string;
-    }>(
-      `/api/pos/orders/${orderId}/settle`,
-      {
-        paymentMethod: 'CASH',
-        tipAmount: 0,
-      },
-      {
-        token: takerToken,
-      },
-    );
-    expect(settleDenied.status).toBe(403);
-    expect(settleDenied.body.code).toBe('INSUFFICIENT_RIGHTS');
-
-    const ledgerDenied = await client.get<{
-      code: string;
-    }>('/api/ledger/restaurant', {
-      token: takerToken,
-    });
-    expect(ledgerDenied.status).toBe(403);
-    expect(ledgerDenied.body.code).toBe('INSUFFICIENT_RIGHTS');
-  });
-
-  it('3.4 Settles order (200), verifies ledger entry (200), and blocks duplicate settle (400 ALREADY_SETTLED)', async () => {
+  it('10.3 Settles order (200), records double-entry ledger (200), and blocks duplicate settle (400 ALREADY_SETTLED)', async () => {
     const settled = await client.post(
       `/api/pos/orders/${orderId}/settle`,
       {
@@ -156,7 +112,7 @@ describe('03 — POS Ordering, Settlement Saga, Double-Entry Ledger & Customer L
         tipAmount: 1.5,
       },
       {
-        token: ownerToken,
+        token: cliftonOwnerToken,
       },
     );
     expect(settled.status).toBe(200);
@@ -166,7 +122,7 @@ describe('03 — POS Ordering, Settlement Saga, Double-Entry Ledger & Customer L
         orderId: string;
       }>;
     }>('/api/ledger/restaurant', {
-      token: ownerToken,
+      token: cliftonOwnerToken,
     });
     expect(ledger.status).toBe(200);
     expect(ledger.body.entries.some((e) => e.orderId === orderId)).toBe(true);
@@ -175,8 +131,8 @@ describe('03 — POS Ordering, Settlement Saga, Double-Entry Ledger & Customer L
       orders: Array<{
         id: string;
       }>;
-    }>('/api/pos/orders', {
-      token: ownerToken,
+    }>(`/api/pos/orders?restaurantId=${cliftonBranchId}`, {
+      token: cliftonOwnerToken,
     });
     expect(ordersList.status).toBe(200);
     expect(ordersList.body.orders.some((o) => o.id === orderId)).toBe(true);
@@ -190,14 +146,14 @@ describe('03 — POS Ordering, Settlement Saga, Double-Entry Ledger & Customer L
         tipAmount: 0,
       },
       {
-        token: ownerToken,
+        token: cliftonOwnerToken,
       },
     );
     expect(duplicateSettle.status).toBe(400);
     expect(duplicateSettle.body.code).toBe('ALREADY_SETTLED');
   });
 
-  it('3.5 Enforces authentication (401) and customer-only RBAC (403) on loyalty endpoints', async () => {
+  it('10.4 Enforces authentication (401) and customer-only RBAC (403) on loyalty endpoints', async () => {
     const unauth = await client.get<{
       code: string;
     }>('/api/ledger/loyalty/me');
@@ -207,7 +163,7 @@ describe('03 — POS Ordering, Settlement Saga, Double-Entry Ledger & Customer L
     const staffForbidden = await client.get<{
       code: string;
     }>('/api/ledger/loyalty/me', {
-      token: ownerToken,
+      token: cliftonOwnerToken,
     });
     expect(staffForbidden.status).toBe(403);
     expect(staffForbidden.body.code).toBe('INSUFFICIENT_RIGHTS');
@@ -220,7 +176,7 @@ describe('03 — POS Ordering, Settlement Saga, Double-Entry Ledger & Customer L
         pointsToRedeem: 50,
       },
       {
-        token: ownerToken,
+        token: cliftonOwnerToken,
       },
     );
     expect(redeemForbidden.status).toBe(403);

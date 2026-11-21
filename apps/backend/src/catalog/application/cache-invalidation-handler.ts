@@ -16,13 +16,13 @@ export class MenuCacheInvalidationHandler {
   }
 
   public register(eventBus: EventBus): void {
-    eventBus.subscribe('RestaurantMenuUpdated', async (event) => {
-      const restaurantId = event.aggregateId;
+    eventBus.subscribe('BranchMenuUpdated', async (event) => {
+      const branchId = event.aggregateId;
       const actorId = event.metadata.actorId;
 
-      const snapshot = await this.catalogRepo.rebuildAndPersistSnapshot(restaurantId, actorId);
+      const snapshot = await this.catalogRepo.rebuildAndPersistSnapshot(branchId, actorId);
       if (snapshot) {
-        const cacheKey = `menu:snapshot:${restaurantId}`;
+        const cacheKey = `menu:snapshot:${branchId}`;
 
         if (!this.redis.isOpen) {
           await this.redis.connect();
@@ -32,7 +32,7 @@ export class MenuCacheInvalidationHandler {
           EX: 3600,
         });
         this.log
-          .info`Refreshed Redis & JSONB MenuSnapshot (${snapshot.versionHash}) for restaurant ${restaurantId}`;
+          .info`Refreshed Redis & JSONB MenuSnapshot (${snapshot.versionHash}) for branch ${branchId}`;
       }
     });
   }

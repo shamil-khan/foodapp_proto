@@ -12,7 +12,7 @@ export interface RequestOptions {
 }
 
 /**
- * GoF Facade: Encapsulates live HTTP fetch calls, cookie persistence,
+ * GoF Facade: Encapsulates live HTTP fetch calls, cookie jar persistence,
  * Bearer JWT headers, and JSON response parsing for smoke tests.
  */
 export class ApiTestClient {
@@ -48,6 +48,14 @@ export class ApiTestClient {
     options?: RequestOptions,
   ): Promise<ApiResponse<T>> {
     return this.request<T>('PATCH', path, payload, options);
+  }
+
+  public async put<T = Record<string, unknown>>(
+    path: string,
+    payload?: unknown,
+    options?: RequestOptions,
+  ): Promise<ApiResponse<T>> {
+    return this.request<T>('PUT', path, payload, options);
   }
 
   public async delete<T = Record<string, unknown>>(
@@ -112,11 +120,13 @@ export class ApiTestClient {
   private captureCookies(headers: Headers): void {
     const setCookies = headers.getSetCookie?.() ?? [];
     for (const raw of setCookies) {
-      const firstPart = raw.split(';')?.trim();
+      const firstPart = raw.split(';')[0]?.trim();
       if (!firstPart) continue;
       const eqIdx = firstPart.indexOf('=');
       if (eqIdx > 0) {
-        this.cookieJar.set(firstPart.slice(0, eqIdx), firstPart.slice(eqIdx + 1));
+        const name = firstPart.slice(0, eqIdx);
+        const value = firstPart.slice(eqIdx + 1);
+        this.cookieJar.set(name, value);
       }
     }
   }
@@ -125,9 +135,10 @@ export class ApiTestClient {
 export async function loginPosStaff(
   client: ApiTestClient,
   credentials: {
-    subdomain: string;
+    brandHandle: string;
     email: string;
     password: string;
+    branchId?: string;
   },
 ): Promise<string> {
   const res = await client.post<{

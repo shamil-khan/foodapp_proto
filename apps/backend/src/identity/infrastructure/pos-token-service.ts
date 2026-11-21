@@ -2,7 +2,7 @@ import { ALL_PERMISSIONS, type Permission } from '@foodapp/db';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { sign, verify } from 'hono/jwt';
-import type { PosStaffSessionClaims } from '@/identity/domain/auth-actor';
+import type { PosStaffSessionClaims, StaffAssignedBranchDto } from '@/identity/domain/auth-actor';
 
 const POS_JWT_SECRET = process.env.BETTER_AUTH_SECRET ?? 'dev_pos_secret_change_in_prod';
 const POS_COOKIE_NAME = 'pos_staff_token';
@@ -50,16 +50,22 @@ export class PosTokenService {
       const permissions = rawPerms
         .map(String)
         .filter((perm): perm is Permission => ALLOWED_PERMS.has(perm));
+      const assignedBranches = Array.isArray(payload.assignedBranches)
+        ? (payload.assignedBranches as StaffAssignedBranchDto[])
+        : [];
 
       return {
         staffId: String(payload.staffId),
         restaurantId: String(payload.restaurantId),
-        subdomain: String(payload.subdomain ?? ''),
+        brandHandle: String(payload.brandHandle ?? ''),
+        activeBranchId: String(payload.activeBranchId ?? ''),
+        activeBranchKey: String(payload.activeBranchKey ?? ''),
         roleId: String(payload.roleId ?? ''),
         role: payload.role as PosStaffSessionClaims['role'],
         name: String(payload.name),
         email: String(payload.email),
         permissions,
+        assignedBranches,
       };
     } catch {
       return null;

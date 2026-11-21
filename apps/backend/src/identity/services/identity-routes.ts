@@ -4,7 +4,7 @@ import { openApiValidationHook } from '@/core/services/openapi-shared';
 import { auth } from '@/identity/infrastructure/better-auth';
 import { requirePermission } from '@/identity/services/auth-middleware';
 import {
-  assignStaffRoleRoute,
+  assignStaffBranchAccessRoute,
   createStaffRoleRoute,
   deleteStaffRoleRoute,
   getCurrentActorRoute,
@@ -12,6 +12,7 @@ import {
   listStaffRolesRoute,
   loginPosStaffRoute,
   logoutPosStaffRoute,
+  switchPosBranchRoute,
   updateStaffRoleRoute,
 } from '@/identity/services/identity-schemas';
 
@@ -32,11 +33,12 @@ identityRoutes.on(
 identityRoutes.openapi(loginPosStaffRoute, (c) =>
   c.var.di.get('identityController').loginPosStaff(c, c.req.valid('json')),
 );
-
+identityRoutes.openapi(switchPosBranchRoute, (c) =>
+  c.var.di.get('identityController').switchPosBranch(c, c.req.valid('json')),
+);
 identityRoutes.openapi(logoutPosStaffRoute, (c) =>
   c.var.di.get('identityController').logoutPosStaff(c),
 );
-
 identityRoutes.openapi(getCurrentActorRoute, (c) =>
   c.var.di.get('identityController').getCurrentActor(c),
 );
@@ -47,25 +49,23 @@ identityRoutes.use('/pos/roles/*', requirePermission('staff:roles:manage'));
 identityRoutes.openapi(listAssignablePermissionsRoute, (c) =>
   c.var.di.get('identityController').listAssignablePermissions(c),
 );
-
 identityRoutes.openapi(listStaffRolesRoute, (c) =>
   c.var.di.get('identityController').listStaffRoles(c, c.req.valid('query')),
 );
-
 identityRoutes.openapi(createStaffRoleRoute, (c) =>
   c.var.di.get('identityController').createStaffRole(c, c.req.valid('json')),
 );
-
 identityRoutes.openapi(updateStaffRoleRoute, (c) =>
   c.var.di.get('identityController').updateStaffRole(c, c.req.valid('param'), c.req.valid('json')),
 );
-
 identityRoutes.openapi(deleteStaffRoleRoute, (c) =>
   c.var.di.get('identityController').deleteStaffRole(c, c.req.valid('param')),
 );
 
 identityRoutes.use('/pos/staff/*', requirePermission('staff:manage'));
 
-identityRoutes.openapi(assignStaffRoleRoute, (c) =>
-  c.var.di.get('identityController').assignStaffRole(c, c.req.valid('param'), c.req.valid('json')),
+identityRoutes.openapi(assignStaffBranchAccessRoute, (c) =>
+  c.var.di
+    .get('identityController')
+    .assignStaffBranchAccess(c, c.req.valid('param'), c.req.valid('json')),
 );

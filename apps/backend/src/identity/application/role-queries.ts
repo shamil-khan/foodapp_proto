@@ -3,8 +3,10 @@ import {
   StaffRolePermissionTable,
   StaffRoleTable,
   sqlSelect,
+  TENANT_PERMISSION_CATALOG,
   TENANT_PERMISSIONS,
   type TenantPermission,
+  type TenantPermissionCatalogEntry,
 } from '@foodapp/db';
 import type { AuthorizationPolicy } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
@@ -19,13 +21,21 @@ export interface StaffRoleWithRightsDto {
   permissions: TenantPermission[];
 }
 
-export interface GetAssignablePermissionsQuery extends Query<readonly TenantPermission[]> {}
+export interface AssignableRightsResponseDto {
+  readonly rights: readonly TenantPermission[];
+  readonly catalog: readonly TenantPermissionCatalogEntry[];
+}
+
+export interface GetAssignablePermissionsQuery extends Query<AssignableRightsResponseDto> {}
 
 export class GetAssignablePermissionsHandler
-  implements QueryHandler<GetAssignablePermissionsQuery, readonly TenantPermission[]>
+  implements QueryHandler<GetAssignablePermissionsQuery, AssignableRightsResponseDto>
 {
-  async execute(): Promise<readonly TenantPermission[]> {
-    return TENANT_PERMISSIONS;
+  async execute(): Promise<AssignableRightsResponseDto> {
+    return {
+      rights: TENANT_PERMISSIONS,
+      catalog: TENANT_PERMISSION_CATALOG,
+    };
   }
 }
 

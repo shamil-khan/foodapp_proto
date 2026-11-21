@@ -9,6 +9,7 @@ export interface ActiveActorProfileDto {
   email: string;
   role: string;
   restaurantId?: string;
+  branchId?: string;
 }
 
 export interface GetCurrentActorQuery extends Query<ActiveActorProfileDto | null> {}
@@ -50,6 +51,7 @@ export class GetCurrentActorHandler
         email: staff.email,
         role: staff.role,
         restaurantId: staff.restaurantId,
+        branchId: this.request.branchId,
       };
     }
 
