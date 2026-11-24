@@ -4,11 +4,15 @@
   "description": "",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsx build src/index.ts",
+    "build": "tsc",
+    "build-2": "tsc --noEmit",
     "format": "biome format --write src tests",
     "lint": "biome lint src tests",
     "fixed": "biome check --write src tests",
-    "test:smoke": "vitest run --config vitest.config.ts",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:smoke": "vitest run --project smoke",
     "snapshot:context": "node -e \"const fs=require('fs'),{execSync}=require('child_process');const tree=execSync('find packages/db/src apps/backend/src -maxdepth 4 -type f | sort').toString();const files=['package.json','apps/backend/package.json','apps/backend/src/app.ts','apps/backend/src/container.ts'];const out=['# Turn-1 Codebase Snapshot\\n\\n## File Tree\\n```text\\n'+tree+'```',...files.map(f=>'## '+f+'\\n```'+(f.endsWith('.json')?'json':'typescript')+'\\n'+fs.readFileSync(f,'utf8')+'\\n```')].join('\\n\\n');fs.writeFileSync('.context-snapshot.md',out);console.log('Wrote .context-snapshot.md');\""
   },
   "keywords": [],
@@ -26,6 +30,7 @@
     "@logtape/logtape": "^2.4.2",
     "@scalar/hono-api-reference": "^0.12.20",
     "better-auth": "^1.7.20",
+    "decimal.js": "^10.6.0",
     "hono": "^4.13.16",
     "zod": "^4.6.7"
   },

@@ -6,40 +6,36 @@ import { Client } from 'pg';
 const TARGET_DB_URL =
   process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/food_app';
 
-async function runSeed() {
+async function runSeed(): Promise<void> {
   const client = new Client({
     connectionString: TARGET_DB_URL,
   });
-  const forceSeed = process.argv.includes('--force');
 
   try {
     await client.connect();
-    console.log('🌱 Connecting to database for seeding...');
+    console.log('🌱 Connecting to database for domain seeding...');
 
-    // Safety Guard: Check if data already exists
-    const { rows } = await client.query(`SELECT COUNT(*) FROM "Restaurant";`);
-    const existingCount = parseInt(rows[0].count, 10);
+    const seedsDir = path.join(import.meta.dirname, '../seeds');
+    const seedFiles = fs
+      .readdirSync(seedsDir)
+      .filter((file) => /^\d+_.+\.sql$/.test(file))
+      .sort();
 
-    if (existingCount > 0 && !forceSeed) {
-      console.log(
-        `⏭️  Database already contains ${existingCount} restaurants. Skipping seed to protect developer data.`,
-      );
-      console.log(
-        '💡 Tip: Run "npx tsx seed-db.ts --force" if you want to append additional seed records.',
-      );
-      return;
+    if (seedFiles.length === 0) {
+      throw new Error(`No numbered seed files found in ${seedsDir}`);
     }
 
-    const seedPath = path.join(import.meta.dirname, '../seeds/seed.sql');
-    const seedSql = fs.readFileSync(seedPath, 'utf-8');
+    const combinedSeedSql = seedFiles
+      .map((file) => `-- >>> ${file}\n${fs.readFileSync(path.join(seedsDir, file), 'utf-8')}`)
+      .join('\n\n');
 
-    console.log('▶️  Executing master seed script...');
+    console.log(`▶️  Executing ${seedFiles.length} seed files: ${seedFiles.join(', ')}...`);
     await client.query('BEGIN');
-    await client.query(seedSql);
+    await client.query(combinedSeedSql);
     await client.query('COMMIT');
 
     console.log(
-      '✅ Successfully seeded 10 UK restaurants, 100 staff, global users, menus, and 20 orders!',
+      '✅ Successfully seeded platform users, 5 brands, 8 branches, roles, menus, and promos!',
     );
   } catch (error) {
     await client.query('ROLLBACK');
@@ -50,4 +46,4 @@ async function runSeed() {
   }
 }
 
-runSeed();
+await runSeed();

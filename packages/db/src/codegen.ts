@@ -153,11 +153,13 @@ async function generateSchema(): Promise<void> {
       appendTableMetadata(lines, tableName, columns);
     }
 
-    const outPath = path.join(import.meta.dirname, 'schema.generated.ts');
+    const generatedDir = path.resolve(import.meta.dirname, '../generated');
+    fs.mkdirSync(generatedDir, {
+      recursive: true,
+    });
+    const outPath = path.join(generatedDir, 'schema.generated.ts');
     fs.writeFileSync(outPath, lines.join('\n'), 'utf-8');
-    console.log(
-      `✅ Generated metadata for ${tables.size} tables at packages/db/src/schema.generated.ts`,
-    );
+    console.log(`✅ Generated metadata for ${tables.size} tables at ${outPath}`);
   } finally {
     await client.end();
   }

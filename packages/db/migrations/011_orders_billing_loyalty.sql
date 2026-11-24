@@ -1,0 +1,226 @@
+-- 1. EXTEND ENUMS FOR MULTI-CHANNEL ORDERS, STATE MACHINES, BILLING & LOYALTY
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'OrderStatus') THEN
+    CREATE TYPE "OrderStatus" AS ENUM (
+      'PENDING_PAYMENT', 'PLACED', 'ACCEPTED', 'PREPARING', 'PACKING',
+      'READY_FOR_PICKUP', 'OUT_FOR_DELIVERY', 'COMPLETED', 'CANCELLED', 'REJECTED'
+    );
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'OrderStateMachineCode') THEN
+    CREATE TYPE "OrderStateMachineCode" AS ENUM (
+      'HOME_KITCHEN_SIMPLE', 'STANDARD_RESTAURANT', 'FULL_KDS_DELIVERY'
+    );
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'LoyaltyHolderType') THEN
+    CREATE TYPE "LoyaltyHolderType" AS ENUM ('CUSTOMER', 'MERCHANT');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'LoyaltyIssuerScope') THEN
+    CREATE TYPE "LoyaltyIssuerScope" AS ENUM ('PLATFORM', 'MERCHANT');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'LoyaltyEntryStatus') THEN
+    CREATE TYPE "LoyaltyEntryStatus" AS ENUM (
+      'HELD', 'RELEASED', 'REDEEMED', 'PENDING_MATURATION',
+      'AVAILABLE', 'AUDIT_HOLD', 'FROZEN', 'EXPIRED', 'REVOKED'
+    );
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'LoyaltyProgramStatus') THEN
+    CREATE TYPE "LoyaltyProgramStatus" AS ENUM ('ACTIVE', 'PAUSED_REDEEM', 'FROZEN');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'SettlementStatus') THEN
+    CREATE TYPE "SettlementStatus" AS ENUM ('PENDING_PAYOUT', 'PAID', 'HELD_FROZEN');
+  END IF;
+END $$;
+
+
+ALTER TYPE "OrderSource"
+ADD VALUE IF NOT EXISTS 'POS';
+
+
+ALTER TYPE "InStorePaymentMethod"
+ADD VALUE IF NOT EXISTS 'COD';
+
+
+ALTER TYPE "InStorePaymentMethod"
+ADD VALUE IF NOT EXISTS 'LOYALTY_POINTS';
+
+
+ALTER TYPE "LoyaltyTxType"
+ADD VALUE IF NOT EXISTS 'HELD';
+
+
+ALTER TYPE "LoyaltyTxType"
+ADD VALUE IF NOT EXISTS 'RELEASED';
+
+
+ALTER TYPE "LoyaltyTxType"
+ADD VALUE IF NOT EXISTS 'REVOKED';
+
+
+ALTER TYPE "LoyaltyTxType"
+ADD VALUE IF NOT EXISTS 'EXPIRED';
+
+
+-- 2. BRANCH PAYMENT CAPABILITIES, CREDIT LIMITS & STATE MACHINE CONFIG
+ALTER TABLE "RestaurantBranch"
+ADD COLUMN IF NOT EXISTS "stateMachineCode" "OrderStateMachineCode" NOT NULL DEFAULT 'STANDARD_RESTAURANT',
+ADD COLUMN IF NOT EXISTS "deliveryMode" TEXT NOT NULL DEFAULT 'MERCHANT_SELF_DELIVERY',
+ADD COLUMN IF NOT EXISTS "deliveryProviderCode" TEXT,
+ADD COLUMN IF NOT EXISTS "paymentCapabilities" JSONB NOT NULL DEFAULT '{"DINE_IN":["CASH","CARD_TERMINAL"],"TAKEAWAY":["CASH","CARD_TERMINAL","ONLINE_GATEWAY"],"DELIVERY":["ONLINE_GATEWAY","COD"],"POS":["CASH","CARD_TERMINAL"]}',
+ADD COLUMN IF NOT EXISTS "maxReceivableCreditLimitGbp" NUMERIC(10, 2) NOT NULL DEFAULT 500.00;
+
+-- 3. EVOLVE ORDER & ORDER LINE ITEMS WITH SNAPSHOTS, POS SYNC & OPTIMISTIC LOCKING
+ALTER TABLE "Order"
+ADD COLUMN IF NOT EXISTS "status" "OrderStatus" NOT NULL DEFAULT 'PLACED',
+ADD COLUMN IF NOT EXISTS "stateMachineCode" "OrderStateMachineCode" NOT NULL DEFAULT 'STANDARD_RESTAURANT',
+ADD COLUMN IF NOT EXISTS "idempotencyKey" TEXT,
+ADD COLUMN IF NOT EXISTS "posTerminalId" TEXT,
+ADD COLUMN IF NOT EXISTS "posReceiptNumber" TEXT,
+ADD COLUMN IF NOT EXISTS "occurredAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN IF NOT EXISTS "syncedAt" TIMESTAMP,
+ADD COLUMN IF NOT EXISTS "loyaltyPointsHeld" INT NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "loyaltyWalletScope" "LoyaltyIssuerScope",
+ADD COLUMN IF NOT EXISTS "loyaltyDiscountGbp" NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+ADD COLUMN IF NOT EXISTS "allowLoyaltyEarn" BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN IF NOT EXISTS "allowLoyaltyRedeem" BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN IF NOT EXISTS "deliveryProviderCode" TEXT,
+ADD COLUMN IF NOT EXISTS "externalDeliveryId" TEXT,
+ADD COLUMN IF NOT EXISTS "providerPayloadSnapshot" JSONB;
+
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_order_branch_idempotency ON "Order" ("branchId", "idempotencyKey")
+WHERE
+  "idempotencyKey" IS NOT NULL
+  AND "deletedAt" IS NULL;
+
+
+CREATE INDEX IF NOT EXISTS idx_order_branch_status_created ON "Order" ("branchId", "status", "createdAt" DESC)
+WHERE
+  "deletedAt" IS NULL;
+
+
+ALTER TABLE "OrderLineItem"
+ADD COLUMN IF NOT EXISTS "menuItemId" UUID,
+ADD COLUMN IF NOT EXISTS "vatRateSnapshot" NUMERIC(5, 2) NOT NULL DEFAULT 20.00,
+ADD COLUMN IF NOT EXISTS "vatAmountSnapshot" NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+ADD COLUMN IF NOT EXISTS "allergenFlagsSnapshot" TEXT[] NOT NULL DEFAULT '{}',
+ADD COLUMN IF NOT EXISTS "modifiersSnapshot" JSONB NOT NULL DEFAULT '[]';
+
+
+-- 4. EXTEND PROMOTIONS WITH TIME/DAY WINDOWS & LOYALTY GATING
+ALTER TABLE "Promotion"
+ADD COLUMN IF NOT EXISTS "validDaysOfWeek" INT[] NOT NULL DEFAULT '{0,1,2,3,4,5,6}',
+ADD COLUMN IF NOT EXISTS "validTimeStart" TEXT,
+ADD COLUMN IF NOT EXISTS "validTimeEnd" TEXT,
+ADD COLUMN IF NOT EXISTS "allowLoyaltyEarn" BOOLEAN NOT NULL DEFAULT TRUE,
+ADD COLUMN IF NOT EXISTS "allowLoyaltyRedeem" BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- 5. DOUBLE-ENTRY BILLING JOURNALS, B2B SETTLEMENTS & IDEMPOTENT EVENT LOG
+CREATE TABLE IF NOT EXISTS "ProcessedEvent" (
+  "eventId" UUID PRIMARY KEY,
+  "consumerName" TEXT NOT NULL,
+  "processedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS "MerchantSettlement" (
+  "id" UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+  "restaurantId" UUID NOT NULL REFERENCES "Restaurant" ("id") ON DELETE RESTRICT,
+  "periodStart" TIMESTAMP NOT NULL,
+  "periodEnd" TIMESTAMP NOT NULL,
+  "grossOnlinePayableGbp" NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+  "cashCommissionReceivableGbp" NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+  "loyaltyFeeOffsetGbp" NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+  "commissionVatGbp" NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+  "netPayoutGbp" NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+  "status" "SettlementStatus" NOT NULL DEFAULT 'PENDING_PAYOUT',
+  "payoutReference" TEXT,
+  "paidAt" TIMESTAMP,
+  "rowVersion" INT NOT NULL DEFAULT 1,
+  "createdAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "createdBy" UUID,
+  "updatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedBy" UUID,
+  "deletedAt" TIMESTAMP,
+  "deletedBy" UUID
+);
+
+
+ALTER TABLE "FinancialLedger"
+ADD COLUMN IF NOT EXISTS "restaurantId" UUID,
+ADD COLUMN IF NOT EXISTS "settlementId" UUID REFERENCES "MerchantSettlement" ("id") ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS "accountCode" TEXT NOT NULL DEFAULT 'LEGACY';
+
+
+CREATE INDEX IF NOT EXISTS idx_ledger_restaurant_unsettled ON "FinancialLedger" ("restaurantId", "settlementId")
+WHERE
+  "deletedAt" IS NULL;
+
+
+-- 6. LOYALTY PROGRAM GOVERNANCE & MATURATION LEDGER EXTENSIONS
+CREATE TABLE IF NOT EXISTS "LoyaltyProgramPolicy" (
+  "id" UUID PRIMARY KEY DEFAULT uuid_generate_v4 (),
+  "issuerScope" "LoyaltyIssuerScope" NOT NULL,
+  "restaurantId" UUID REFERENCES "Restaurant" ("id") ON DELETE CASCADE,
+  "status" "LoyaltyProgramStatus" NOT NULL DEFAULT 'ACTIVE',
+  "maturationDays" INT NOT NULL DEFAULT 14,
+  "expiryDays" INT NOT NULL DEFAULT 365,
+  "freezeExpiry" BOOLEAN NOT NULL DEFAULT FALSE,
+  "pointsPerGbp" NUMERIC(8, 2) NOT NULL DEFAULT 10.00,
+  "gbpPerPoint" NUMERIC(8, 4) NOT NULL DEFAULT 0.0100,
+  "statusReason" TEXT,
+  "rowVersion" INT NOT NULL DEFAULT 1,
+  "createdAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "createdBy" UUID,
+  "updatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedBy" UUID,
+  "deletedAt" TIMESTAMP,
+  "deletedBy" UUID
+);
+
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_loyalty_policy_scope ON "LoyaltyProgramPolicy" (
+  "issuerScope",
+  coalesce(
+    "restaurantId",
+    '00000000-0000-0000-0000-000000000000'::UUID
+  )
+)
+WHERE
+  "deletedAt" IS NULL;
+
+
+ALTER TABLE "LoyaltyLedger"
+ADD COLUMN IF NOT EXISTS "holderType" "LoyaltyHolderType" NOT NULL DEFAULT 'CUSTOMER',
+ADD COLUMN IF NOT EXISTS "holderId" UUID,
+ADD COLUMN IF NOT EXISTS "issuerScope" "LoyaltyIssuerScope" NOT NULL DEFAULT 'PLATFORM',
+ADD COLUMN IF NOT EXISTS "issuerMerchantId" UUID,
+ADD COLUMN IF NOT EXISTS "sourceType" TEXT NOT NULL DEFAULT 'ORDER_EARN',
+ADD COLUMN IF NOT EXISTS "status" "LoyaltyEntryStatus" NOT NULL DEFAULT 'AVAILABLE',
+ADD COLUMN IF NOT EXISTS "maturesAt" TIMESTAMP,
+ADD COLUMN IF NOT EXISTS "expiresAt" TIMESTAMP,
+ADD COLUMN IF NOT EXISTS "referenceEntryId" UUID,
+ADD COLUMN IF NOT EXISTS "auditReason" TEXT;
+
+
+UPDATE "LoyaltyLedger"
+SET
+  "holderId" = "userId"
+WHERE
+  "holderId" IS NULL;
+
+
+CREATE INDEX IF NOT EXISTS idx_loyalty_holder_status ON "LoyaltyLedger" (
+  "holderType",
+  "holderId",
+  "issuerScope",
+  "status"
+)
+WHERE
+  "deletedAt" IS NULL;

@@ -14,6 +14,7 @@
     "db:drop": "podman compose down -v",
     "db:migrate": "turbo run db:migrate --filter=@foodapp/db",
     "db:seed": "turbo run db:seed --filter=@foodapp/db",
+    "db:bundle": "turbo run db:bundle --filter=@foodapp/db",
     "db:setup": "pnpm db:up && pnpm db:migrate && pnpm db:seed",
     "db:reset": "pnpm db:drop && pnpm db:setup",
     "ai-context": "node scripts/ai-context.js"

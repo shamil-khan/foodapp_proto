@@ -1,14 +1,19 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import { Scalar } from '@scalar/hono-api-reference';
+import { billingRoutes } from '@/billing/services/billing-routes';
 import { adminCatalogRoutes, catalogRoutes } from '@/catalog/services/catalog-routes';
 import { apiCorsMiddleware } from '@/config/cors';
-import type { AppEnv } from '@/container';
+import { type AppEnv, sharedIdempotencyStore } from '@/container';
 import { openApiValidationHook } from '@/core/services/openapi-shared';
 import { globalErrorHandler } from '@/errorHandler';
 import { initDiScope } from '@/identity/services/auth-middleware';
 import { identityRoutes } from '@/identity/services/identity-routes';
-import { ledgerRoutes } from '@/ledger/services/ledger-routes';
-import { orderRoutes } from '@/ordering/services/order-routes';
+import { loyaltyRoutes } from '@/loyalty/services/loyalty-routes';
+import {
+  createPosOrderRoutes,
+  createStorefrontOrderRoutes,
+  deliveryWebhookRoutes,
+} from '@/orders/services/order-routes';
 
 const HealthResponseSchema = z
   .object({
@@ -55,8 +60,11 @@ export function createApp(options: CreateAppOptions = {}): OpenAPIHono<AppEnv> {
   app.route('/api', identityRoutes);
   app.route('/api/brands', catalogRoutes);
   app.route('/api/admin', adminCatalogRoutes);
-  app.route('/api/pos/orders', orderRoutes);
-  app.route('/api/ledger', ledgerRoutes);
+  app.route('/api/orders', createStorefrontOrderRoutes(sharedIdempotencyStore));
+  app.route('/api/pos/orders', createPosOrderRoutes(sharedIdempotencyStore));
+  app.route('/api/webhooks/delivery', deliveryWebhookRoutes);
+  app.route('/api/billing', billingRoutes);
+  app.route('/api/loyalty', loyaltyRoutes);
 
   app.openapi(healthRoute, (c) => {
     const currentDatetime = new Date().toISOString();
@@ -82,10 +90,10 @@ export function createApp(options: CreateAppOptions = {}): OpenAPIHono<AppEnv> {
   app.doc31('/api/doc', {
     openapi: '3.1.0',
     info: {
-      title: 'FoodApp Multi-Branch POS & Storefront API',
+      title: 'FoodApp Multi-Branch POS, Storefront, Billing & Loyalty API',
       version: '1.0.0',
       description:
-        'Multi-branch restaurants, home/cloud kitchens, pricing workflows, and per-branch PBAC API.',
+        'Multi-branch restaurants, home/cloud kitchens, pricing workflows, per-branch PBAC, Event-sourced DDD/CQRS modular monolith for storefronts, offline-capable POS terminals, double-entry GBP billing, and multi-scope loyalty.',
     },
   });
 

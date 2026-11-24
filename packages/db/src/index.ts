@@ -16,6 +16,6 @@ redisClient.on('error', (err: unknown) => {
   console.error('Redis Client Error:', err);
 });
 
-export * from './schema.generated.ts';
+export * from '../generated/schema.generated.ts';
 export * from './sql-builder.ts';
 export * from './types.ts';

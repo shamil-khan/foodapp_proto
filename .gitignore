@@ -1,3 +1,7 @@
+# Generated SQL bundles (reproducible via pnpm db:bundle)
+packages/db/generated/bundles/
+
+
 # prod
 ai-dist/
 dist/

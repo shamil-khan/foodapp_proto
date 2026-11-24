@@ -7,6 +7,17 @@ import {
   type Spec,
   type WithRequirements,
 } from '@inferdi/inferdi';
+import { BillingSettlementEventHandler } from '@/billing/application/billing-event-handler';
+import {
+  BillingSettlementService,
+  RefundOrderHandler,
+  SettleMerchantHandler,
+} from '@/billing/application/commands';
+import { GetRestaurantBillingHandler } from '@/billing/application/queries';
+import { BillingRepository } from '@/billing/infrastructure/billing-repository';
+import { DeterministicMockGateway } from '@/billing/infrastructure/mocks/deterministic-mock-gateway';
+import { MockCardTerminalAdapter } from '@/billing/infrastructure/mocks/mock-card-terminal';
+import { BillingController } from '@/billing/services/billing-controller';
 import {
   CreateRestaurantByAdminHandler,
   UpdateRestaurantStatusByAdminHandler,
@@ -45,6 +56,7 @@ import {
 import { type EventBus, InMemoryEventBus } from '@/core/application/event-bus';
 import { PgEventStore } from '@/core/infrastructure/pg-event-store';
 import { PgSagaRepository } from '@/core/infrastructure/pg-saga-repository';
+import { RedisIdempotencyStore } from '@/core/services/idempotency-middleware';
 import { SwitchPosBranchHandler } from '@/identity/application/branch-switch-command';
 import { LoginPosStaffHandler } from '@/identity/application/pos-login-command';
 import { GetCurrentActorHandler } from '@/identity/application/queries';
@@ -60,23 +72,38 @@ import {
 } from '@/identity/application/role-queries';
 import { RolePermissionCache } from '@/identity/infrastructure/role-permission-cache';
 import { IdentityController } from '@/identity/services/identity-controller';
-import {
-  RecordOrderSettlementHandler,
-  RedeemLoyaltyPointsHandler,
-} from '@/ledger/application/commands';
-import { LoyaltyPointsEventHandler } from '@/ledger/application/loyalty-event-handler';
-import {
-  GetRestaurantLedgerHandler,
-  GetUserLoyaltyBalanceHandler,
-} from '@/ledger/application/queries';
-import { LedgerRepository } from '@/ledger/infrastructure/ledger-repository';
-import { LedgerController } from '@/ledger/services/ledger-controller';
 import { AppLogger } from '@/logger';
-import { PlacePosOrderHandler, SettlePosOrderHandler } from '@/ordering/application/commands';
-import { OrderSettlementSaga } from '@/ordering/application/order-saga';
-import { GetRestaurantOrdersHandler } from '@/ordering/application/queries';
-import { OrderRepository } from '@/ordering/infrastructure/order-repository';
-import { OrderController } from '@/ordering/services/order-controller';
+import {
+  AuditLoyaltyEntryHandler,
+  LoyaltySettlementService,
+  UpdateLoyaltyGovernanceHandler,
+} from '@/loyalty/application/commands';
+import { LoyaltySettlementEventHandler } from '@/loyalty/application/loyalty-event-handler';
+import { SystemClock } from '@/loyalty/application/loyalty-ports';
+import { GetCustomerLoyaltyHandler } from '@/loyalty/application/queries';
+import { LoyaltyRepository } from '@/loyalty/infrastructure/loyalty-repository';
+import { LoyaltyController } from '@/loyalty/services/loyalty-controller';
+import { RedisCartService } from '@/orders/application/cart-service';
+import {
+  CheckoutOrderHandler,
+  PlacePosOrderHandler,
+  PreviewOrderHandler,
+  SettlePosOrderHandler,
+  TransitionOrderStatusHandler,
+} from '@/orders/application/commands';
+import { OrderCheckoutSaga } from '@/orders/application/order-checkout-saga';
+import { OrderSettlementSaga } from '@/orders/application/order-saga';
+import { SyncPosOrdersHandler } from '@/orders/application/pos-sync-command';
+import {
+  GetOrderByIdHandler,
+  GetOrderEventsSinceHandler,
+  GetRestaurantOrdersHandler,
+} from '@/orders/application/queries';
+import { ConsoleCaptureNotifier } from '@/orders/infrastructure/mocks/console-capture-notifier';
+import { DeterministicOrderGatewayAdapter } from '@/orders/infrastructure/mocks/deterministic-order-gateway';
+import { SimulatedUkCourierAdapter } from '@/orders/infrastructure/mocks/simulated-uk-courier';
+import { OrderRepository } from '@/orders/infrastructure/order-repository';
+import { OrderController } from '@/orders/services/order-controller';
 
 export type { RequestContext };
 
@@ -91,6 +118,8 @@ export const DI_TOKENS = {
     EVENT_BUS: 'eventBus',
     EVENT_STORE: 'eventStore',
     SAGA_REPO: 'sagaRepo',
+    IDEMPOTENCY_STORE: 'idempotencyStore',
+    CLOCK: 'clock',
     AUTHZ: 'authz',
     COMMAND_BUS: 'commandBus',
     QUERY_BUS: 'queryBus',
@@ -130,22 +159,44 @@ export const DI_TOKENS = {
     UPDATE_ITEM_PRICE_HANDLER: 'updateItemPriceHandler',
     CONTROLLER: 'catalogController',
   },
-  ORDERING: {
-    REPO: 'orderRepo',
-    ORDER_SAGA: 'orderSaga',
-    PLACE_ORDER_HANDLER: 'placeOrderHandler',
-    SETTLE_ORDER_HANDLER: 'settleOrderHandler',
-    GET_ORDERS_HANDLER: 'getOrdersHandler',
-    CONTROLLER: 'orderController',
+  LOYALTY: {
+    REPO: 'loyaltyRepo',
+    SETTLEMENT_SERVICE: 'loyaltySettlementService',
+    EVENT_HANDLER: 'loyaltySettlementEventHandler',
+    GET_CUSTOMER_LOYALTY_HANDLER: 'getCustomerLoyaltyHandler',
+    UPDATE_GOVERNANCE_HANDLER: 'updateLoyaltyGovernanceHandler',
+    AUDIT_ENTRY_HANDLER: 'auditLoyaltyEntryHandler',
+    CONTROLLER: 'loyaltyController',
   },
-  LEDGER: {
-    REPO: 'ledgerRepo',
-    LOYALTY_EVENT_HANDLER: 'loyaltyEventHandler',
-    GET_RESTAURANT_LEDGER_HANDLER: 'getRestaurantLedgerHandler',
-    GET_USER_LOYALTY_HANDLER: 'getUserLoyaltyHandler',
-    RECORD_SETTLEMENT_HANDLER: 'recordSettlementHandler',
-    REDEEM_LOYALTY_HANDLER: 'redeemLoyaltyHandler',
-    CONTROLLER: 'ledgerController',
+  BILLING: {
+    REPO: 'billingRepo',
+    GATEWAY: 'paymentGateway',
+    CARD_TERMINAL: 'cardTerminal',
+    SETTLEMENT_SERVICE: 'billingSettlementService',
+    EVENT_HANDLER: 'billingSettlementEventHandler',
+    GET_RESTAURANT_BILLING_HANDLER: 'getRestaurantBillingHandler',
+    REFUND_ORDER_HANDLER: 'refundOrderHandler',
+    SETTLE_MERCHANT_HANDLER: 'settleMerchantHandler',
+    CONTROLLER: 'billingController',
+  },
+  ORDERS: {
+    REPO: 'orderRepo',
+    CART_SERVICE: 'cartService',
+    GATEWAY: 'orderGateway',
+    DELIVERY_PROVIDER: 'deliveryProvider',
+    NOTIFIER: 'notifier',
+    ORDER_SAGA: 'orderSaga',
+    CHECKOUT_SAGA: 'orderCheckoutSaga',
+    PREVIEW_ORDER_HANDLER: 'previewOrderHandler',
+    CHECKOUT_ORDER_HANDLER: 'checkoutOrderHandler',
+    PLACE_ORDER_HANDLER: 'placePosOrderHandler',
+    TRANSITION_ORDER_HANDLER: 'transitionOrderStatusHandler',
+    SETTLE_ORDER_HANDLER: 'settlePosOrderHandler',
+    SYNC_POS_ORDERS_HANDLER: 'syncPosOrdersHandler',
+    GET_ORDERS_HANDLER: 'getRestaurantOrdersHandler',
+    GET_ORDER_BY_ID_HANDLER: 'getOrderByIdHandler',
+    GET_ORDER_EVENTS_SINCE_HANDLER: 'getOrderEventsSinceHandler',
+    CONTROLLER: 'orderController',
   },
 } as const;
 
@@ -164,10 +215,13 @@ type CoreDeps = ScopeInputMap<{
   eventBus: Spec<EventBus, 'singleton'>;
   eventStore: Spec<PgEventStore, 'singleton'>;
   sagaRepo: Spec<PgSagaRepository, 'singleton'>;
+  idempotencyStore: Spec<RedisIdempotencyStore, 'singleton'>;
+  clock: Spec<SystemClock, 'singleton'>;
   authz: WithRequirements<Spec<AuthorizationPolicy, 'scoped'>, 'request'>;
 };
 
 const eventBus = new InMemoryEventBus();
+export const sharedIdempotencyStore = new RedisIdempotencyStore(redisClient);
 
 const coreContainer: Container<CoreDeps> = new Container()
   .declareScopeInputs<{
@@ -178,6 +232,8 @@ const coreContainer: Container<CoreDeps> = new Container()
   .registerValue(DI_TOKENS.CORE.REDIS, redisClient)
   // Domain Event Bus (pub/sub for async DomainEvents; separate from request-scoped CQRS CommandBus & QueryBus).
   .registerValue<typeof DI_TOKENS.CORE.EVENT_BUS, EventBus>(DI_TOKENS.CORE.EVENT_BUS, eventBus)
+  .registerValue(DI_TOKENS.CORE.IDEMPOTENCY_STORE, sharedIdempotencyStore)
+  .registerClass(DI_TOKENS.CORE.CLOCK, SystemClock, [], 'singleton')
   .registerClass(
     DI_TOKENS.CORE.EVENT_STORE,
     PgEventStore,
@@ -455,7 +511,7 @@ const identityModule = defineBoundedContext<IdentityProvides>({
 
 // Declaring Catalog bounded context:
 // Manages public storefront restaurant discovery, admin tenant provisioning, and
-// pre-compiled JSONB + Redis menu snapshots. Subscribes to `RestaurantMenuUpdated`
+// pre-compiled JSONB + Redis menu snapshots. Subscribes to `BranchMenuUpdated`
 // events to rebuild and invalidate stale menu caches asynchronously.
 
 type CatalogProvides = {
@@ -785,7 +841,6 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
       requiredPermission: 'catalog:price:update',
     });
   },
-
   queries: (c, queryBus) => {
     queryBus.register('ListBrands', c.get(DI_TOKENS.CATALOG.LIST_BRANDS_HANDLER));
     queryBus.register(
@@ -803,231 +858,467 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
   },
 });
 
-// Declaring Ordering bounded context:
-// Owns event-sourced POS order placement, KDS ticket routing, and bill settlement.
-// Subscribes `OrderSettlementSaga` to `PosOrderSettled` events so financial ledger
-// entries are recorded idempotently with saga compensation tracking.
+// Declaring Loyalty bounded context:
+// Owns customer and merchant loyalty wallets, expiring point batches, governance rules,
+// and audit adjustments. Subscribes to `LoyaltyHoldRequested`, `BillingSettlementRecorded`,
+// `OrderCancelledOrRejected`, and `MerchantLoyaltyOffsetRequested` domain events.
 
-type OrderingProvides = {
-  orderRepo: Spec<OrderRepository, 'singleton'>;
-  placeOrderHandler: WithRequirements<Spec<PlacePosOrderHandler, 'scoped'>, 'request'>;
-  settleOrderHandler: WithRequirements<Spec<SettlePosOrderHandler, 'scoped'>, 'request'>;
-  getOrdersHandler: WithRequirements<Spec<GetRestaurantOrdersHandler, 'scoped'>, 'request'>;
+type LoyaltyProvides = {
+  loyaltyRepo: WithRequirements<Spec<LoyaltyRepository, 'scoped'>, 'request'>;
+  loyaltySettlementService: WithRequirements<Spec<LoyaltySettlementService, 'scoped'>, 'request'>;
+  loyaltySettlementEventHandler: WithRequirements<
+    Spec<LoyaltySettlementEventHandler, 'scoped'>,
+    'request'
+  >;
+  getCustomerLoyaltyHandler: WithRequirements<Spec<GetCustomerLoyaltyHandler, 'scoped'>, 'request'>;
+  updateLoyaltyGovernanceHandler: WithRequirements<
+    Spec<UpdateLoyaltyGovernanceHandler, 'scoped'>,
+    'request'
+  >;
+  auditLoyaltyEntryHandler: WithRequirements<Spec<AuditLoyaltyEntryHandler, 'scoped'>, 'request'>;
 };
 
-const orderingModule = defineBoundedContext<OrderingProvides>({
-  name: 'Ordering',
+const loyaltyModule = defineBoundedContext<LoyaltyProvides>({
+  name: 'Loyalty',
   commandDeps: [
-    DI_TOKENS.ORDERING.PLACE_ORDER_HANDLER,
-    DI_TOKENS.ORDERING.SETTLE_ORDER_HANDLER,
+    DI_TOKENS.LOYALTY.UPDATE_GOVERNANCE_HANDLER,
+    DI_TOKENS.LOYALTY.AUDIT_ENTRY_HANDLER,
   ],
   queryDeps: [
-    DI_TOKENS.ORDERING.GET_ORDERS_HANDLER,
+    DI_TOKENS.LOYALTY.GET_CUSTOMER_LOYALTY_HANDLER,
   ],
   module: (container) =>
     container
       .registerClass(
-        DI_TOKENS.ORDERING.REPO,
+        DI_TOKENS.LOYALTY.REPO,
+        LoyaltyRepository,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.LOYALTY.SETTLEMENT_SERVICE,
+        LoyaltySettlementService,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.LOYALTY.REPO,
+          DI_TOKENS.CORE.CLOCK,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.LOYALTY.EVENT_HANDLER,
+        LoyaltySettlementEventHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.LOYALTY.SETTLEMENT_SERVICE,
+          DI_TOKENS.CORE.EVENT_BUS,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.LOYALTY.GET_CUSTOMER_LOYALTY_HANDLER,
+        GetCustomerLoyaltyHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.LOYALTY.REPO,
+          DI_TOKENS.CORE.AUTHZ,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.LOYALTY.UPDATE_GOVERNANCE_HANDLER,
+        UpdateLoyaltyGovernanceHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.LOYALTY.AUDIT_ENTRY_HANDLER,
+        AuditLoyaltyEntryHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.LOYALTY.REPO,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      ),
+  commands: (c, commandBus) => {
+    commandBus.register(
+      'UpdateLoyaltyGovernance',
+      c.get(DI_TOKENS.LOYALTY.UPDATE_GOVERNANCE_HANDLER),
+    );
+    commandBus.register('AuditLoyaltyEntry', c.get(DI_TOKENS.LOYALTY.AUDIT_ENTRY_HANDLER));
+  },
+  queries: (c, queryBus) => {
+    queryBus.register('GetCustomerLoyalty', c.get(DI_TOKENS.LOYALTY.GET_CUSTOMER_LOYALTY_HANDLER), {
+      requiredPermission: 'loyalty:read',
+    });
+  },
+  subscribers: (scope, bus) => {
+    scope.get(DI_TOKENS.LOYALTY.EVENT_HANDLER).register(bus);
+  },
+});
+
+// Declaring Billing bounded context:
+// Enforces double-entry UK VAT/commission accounting (`GATEWAY_CLEARING`, merchant net,
+// platform fee, HMRC VAT), gateway/terminal adapters, refunds, and B2B merchant payouts.
+// Subscribes to `OrderSettlementFinancialsRequested` and `MerchantLoyaltyOffsetApplied`.
+
+type BillingProvides = {
+  billingRepo: WithRequirements<Spec<BillingRepository, 'scoped'>, 'request'>;
+  paymentGateway: Spec<DeterministicMockGateway, 'singleton'>;
+  cardTerminal: Spec<MockCardTerminalAdapter, 'singleton'>;
+  billingSettlementService: WithRequirements<Spec<BillingSettlementService, 'scoped'>, 'request'>;
+  billingSettlementEventHandler: WithRequirements<
+    Spec<BillingSettlementEventHandler, 'scoped'>,
+    'request'
+  >;
+  getRestaurantBillingHandler: WithRequirements<
+    Spec<GetRestaurantBillingHandler, 'scoped'>,
+    'request'
+  >;
+  refundOrderHandler: WithRequirements<Spec<RefundOrderHandler, 'scoped'>, 'request'>;
+  settleMerchantHandler: WithRequirements<Spec<SettleMerchantHandler, 'scoped'>, 'request'>;
+};
+
+const billingModule = defineBoundedContext<BillingProvides>({
+  name: 'Billing',
+  commandDeps: [
+    DI_TOKENS.BILLING.REFUND_ORDER_HANDLER,
+    DI_TOKENS.BILLING.SETTLE_MERCHANT_HANDLER,
+  ],
+  queryDeps: [
+    DI_TOKENS.BILLING.GET_RESTAURANT_BILLING_HANDLER,
+  ],
+  module: (container) =>
+    container
+      .registerClass(
+        DI_TOKENS.BILLING.REPO,
+        BillingRepository,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(DI_TOKENS.BILLING.GATEWAY, DeterministicMockGateway, [], 'singleton')
+      .registerClass(DI_TOKENS.BILLING.CARD_TERMINAL, MockCardTerminalAdapter, [], 'singleton')
+      .registerClass(
+        DI_TOKENS.BILLING.SETTLEMENT_SERVICE,
+        BillingSettlementService,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.BILLING.REPO,
+          DI_TOKENS.CORE.EVENT_BUS,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.BILLING.EVENT_HANDLER,
+        BillingSettlementEventHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.BILLING.SETTLEMENT_SERVICE,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.BILLING.GET_RESTAURANT_BILLING_HANDLER,
+        GetRestaurantBillingHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.BILLING.REPO,
+          DI_TOKENS.CORE.AUTHZ,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.BILLING.REFUND_ORDER_HANDLER,
+        RefundOrderHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.BILLING.REPO,
+          DI_TOKENS.BILLING.GATEWAY,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.BILLING.SETTLE_MERCHANT_HANDLER,
+        SettleMerchantHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.BILLING.REPO,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      ),
+  commands: (c, commandBus) => {
+    commandBus.register('RefundOrder', c.get(DI_TOKENS.BILLING.REFUND_ORDER_HANDLER), {
+      requiredPermission: 'orders:settle',
+    });
+    commandBus.register('SettleMerchant', c.get(DI_TOKENS.BILLING.SETTLE_MERCHANT_HANDLER));
+  },
+  queries: (c, queryBus) => {
+    queryBus.register(
+      'GetRestaurantBilling',
+      c.get(DI_TOKENS.BILLING.GET_RESTAURANT_BILLING_HANDLER),
+      {
+        requiredPermission: 'ledger:read',
+      },
+    );
+  },
+  subscribers: (scope, bus) => {
+    scope.get(DI_TOKENS.BILLING.EVENT_HANDLER).register(bus);
+  },
+});
+
+// Declaring Orders bounded context:
+// Owns storefront carts, authoritative order pricing/checkout, POS order placement,
+// KDS ticket routing, named status state machines, offline POS sync, and 3PL webhooks.
+// Subscribes `OrderSettlementSaga` and `OrderCheckoutSaga` to coordinate billing and
+// loyalty handoffs asynchronously via `EventBus` and `PgSagaRepository`.
+
+type OrdersProvides = {
+  orderRepo: WithRequirements<Spec<OrderRepository, 'scoped'>, 'request'>;
+  cartService: Spec<RedisCartService, 'singleton'>;
+  orderGateway: Spec<DeterministicOrderGatewayAdapter, 'singleton'>;
+  deliveryProvider: Spec<SimulatedUkCourierAdapter, 'singleton'>;
+  notifier: Spec<ConsoleCaptureNotifier, 'singleton'>;
+  orderSaga: Spec<OrderSettlementSaga, 'singleton'>;
+  orderCheckoutSaga: WithRequirements<Spec<OrderCheckoutSaga, 'scoped'>, 'request'>;
+  previewOrderHandler: Spec<PreviewOrderHandler, 'singleton'>;
+  checkoutOrderHandler: WithRequirements<Spec<CheckoutOrderHandler, 'scoped'>, 'request'>;
+  placePosOrderHandler: WithRequirements<Spec<PlacePosOrderHandler, 'scoped'>, 'request'>;
+  transitionOrderStatusHandler: WithRequirements<
+    Spec<TransitionOrderStatusHandler, 'scoped'>,
+    'request'
+  >;
+  settlePosOrderHandler: WithRequirements<Spec<SettlePosOrderHandler, 'scoped'>, 'request'>;
+  syncPosOrdersHandler: WithRequirements<Spec<SyncPosOrdersHandler, 'scoped'>, 'request'>;
+  getRestaurantOrdersHandler: WithRequirements<
+    Spec<GetRestaurantOrdersHandler, 'scoped'>,
+    'request'
+  >;
+  getOrderByIdHandler: WithRequirements<Spec<GetOrderByIdHandler, 'scoped'>, 'request'>;
+  getOrderEventsSinceHandler: Spec<GetOrderEventsSinceHandler, 'singleton'>;
+};
+
+const ordersModule = defineBoundedContext<OrdersProvides>({
+  name: 'Orders',
+  commandDeps: [
+    DI_TOKENS.ORDERS.PREVIEW_ORDER_HANDLER,
+    DI_TOKENS.ORDERS.CHECKOUT_ORDER_HANDLER,
+    DI_TOKENS.ORDERS.PLACE_ORDER_HANDLER,
+    DI_TOKENS.ORDERS.TRANSITION_ORDER_HANDLER,
+    DI_TOKENS.ORDERS.SETTLE_ORDER_HANDLER,
+    DI_TOKENS.ORDERS.SYNC_POS_ORDERS_HANDLER,
+  ],
+  queryDeps: [
+    DI_TOKENS.ORDERS.GET_ORDERS_HANDLER,
+    DI_TOKENS.ORDERS.GET_ORDER_BY_ID_HANDLER,
+    DI_TOKENS.ORDERS.GET_ORDER_EVENTS_SINCE_HANDLER,
+  ],
+  module: (container) =>
+    container
+      .registerClass(
+        DI_TOKENS.ORDERS.REPO,
         OrderRepository,
         [
           DI_TOKENS.CORE.DB,
           DI_TOKENS.CORE.EVENT_STORE,
           DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.ORDERS.CART_SERVICE,
+        RedisCartService,
+        [
+          DI_TOKENS.CORE.REDIS,
+        ],
+        'singleton',
+      )
+      .registerClass(DI_TOKENS.ORDERS.GATEWAY, DeterministicOrderGatewayAdapter, [], 'singleton')
+      .registerClass(DI_TOKENS.ORDERS.DELIVERY_PROVIDER, SimulatedUkCourierAdapter, [], 'singleton')
+      .registerClass(DI_TOKENS.ORDERS.NOTIFIER, ConsoleCaptureNotifier, [], 'singleton')
+      .registerClass(
+        DI_TOKENS.ORDERS.ORDER_SAGA,
+        OrderSettlementSaga,
+        [
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.SAGA_REPO,
+          DI_TOKENS.ORDERS.NOTIFIER,
         ],
         'singleton',
       )
       .registerClass(
-        DI_TOKENS.ORDERING.PLACE_ORDER_HANDLER,
+        DI_TOKENS.ORDERS.CHECKOUT_SAGA,
+        OrderCheckoutSaga,
+        [
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.SAGA_REPO,
+          DI_TOKENS.ORDERS.REPO,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.ORDERS.PREVIEW_ORDER_HANDLER,
+        PreviewOrderHandler,
+        [
+          DI_TOKENS.CORE.DB,
+        ],
+        'singleton',
+      )
+      .registerClass(
+        DI_TOKENS.ORDERS.CHECKOUT_ORDER_HANDLER,
+        CheckoutOrderHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.ORDERS.REPO,
+          DI_TOKENS.ORDERS.CART_SERVICE,
+          DI_TOKENS.ORDERS.GATEWAY,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.ORDERS.PLACE_ORDER_HANDLER,
         PlacePosOrderHandler,
         [
           DI_TOKENS.CORE.DB,
-          DI_TOKENS.ORDERING.REPO,
+          DI_TOKENS.ORDERS.REPO,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
         'scoped',
       )
       .registerClass(
-        DI_TOKENS.ORDERING.SETTLE_ORDER_HANDLER,
+        DI_TOKENS.ORDERS.TRANSITION_ORDER_HANDLER,
+        TransitionOrderStatusHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.ORDERS.REPO,
+          DI_TOKENS.ORDERS.DELIVERY_PROVIDER,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.ORDERS.SETTLE_ORDER_HANDLER,
         SettlePosOrderHandler,
         [
-          DI_TOKENS.ORDERING.REPO,
+          DI_TOKENS.ORDERS.REPO,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
         'scoped',
       )
       .registerClass(
-        DI_TOKENS.ORDERING.GET_ORDERS_HANDLER,
+        DI_TOKENS.ORDERS.SYNC_POS_ORDERS_HANDLER,
+        SyncPosOrdersHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.ORDERS.REPO,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.ORDERS.GET_ORDERS_HANDLER,
         GetRestaurantOrdersHandler,
         [
           DI_TOKENS.CORE.DB,
           DI_TOKENS.CORE.AUTHZ,
         ],
         'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.ORDERS.GET_ORDER_BY_ID_HANDLER,
+        GetOrderByIdHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.ORDERS.GET_ORDER_EVENTS_SINCE_HANDLER,
+        GetOrderEventsSinceHandler,
+        [
+          DI_TOKENS.CORE.DB,
+        ],
+        'singleton',
       ),
   commands: (c, commandBus) => {
-    commandBus.register('PlacePosOrder', c.get(DI_TOKENS.ORDERING.PLACE_ORDER_HANDLER), {
+    commandBus.register('PreviewOrder', c.get(DI_TOKENS.ORDERS.PREVIEW_ORDER_HANDLER));
+    commandBus.register('CheckoutOrder', c.get(DI_TOKENS.ORDERS.CHECKOUT_ORDER_HANDLER));
+    commandBus.register('PlacePosOrder', c.get(DI_TOKENS.ORDERS.PLACE_ORDER_HANDLER), {
       requiredPermission: 'orders:place',
     });
-    commandBus.register('SettlePosOrder', c.get(DI_TOKENS.ORDERING.SETTLE_ORDER_HANDLER), {
+    commandBus.register('TransitionOrderStatus', c.get(DI_TOKENS.ORDERS.TRANSITION_ORDER_HANDLER));
+    commandBus.register('SettlePosOrder', c.get(DI_TOKENS.ORDERS.SETTLE_ORDER_HANDLER), {
       requiredPermission: 'orders:settle',
     });
+    commandBus.register('SyncPosOrders', c.get(DI_TOKENS.ORDERS.SYNC_POS_ORDERS_HANDLER), {
+      requiredPermission: 'orders:place',
+    });
   },
   queries: (c, queryBus) => {
-    queryBus.register('GetRestaurantOrders', c.get(DI_TOKENS.ORDERING.GET_ORDERS_HANDLER), {
+    queryBus.register('GetRestaurantOrders', c.get(DI_TOKENS.ORDERS.GET_ORDERS_HANDLER), {
       requiredPermission: 'orders:read',
     });
-  },
-  subscribers: (scope, bus) => {
-    scope.get(DI_TOKENS.ORDERING.ORDER_SAGA).register(bus);
-  },
-});
-
-// Declaring Ledger bounded context:
-// Enforces double-entry UK VAT/commission accounting (`GATEWAY_CLEARING`, merchant net,
-// platform fee, HMRC VAT) and customer loyalty point accrual/redemption. Subscribes to
-// `LoyaltyPointsEligible` events emitted after order settlement.
-
-type LedgerProvides = {
-  ledgerRepo: Spec<LedgerRepository, 'singleton'>;
-  loyaltyEventHandler: Spec<LoyaltyPointsEventHandler, 'singleton'>;
-  getRestaurantLedgerHandler: WithRequirements<
-    Spec<GetRestaurantLedgerHandler, 'scoped'>,
-    'request'
-  >;
-  getUserLoyaltyHandler: WithRequirements<Spec<GetUserLoyaltyBalanceHandler, 'scoped'>, 'request'>;
-  recordSettlementHandler: WithRequirements<
-    Spec<RecordOrderSettlementHandler, 'scoped'>,
-    'request'
-  >;
-  redeemLoyaltyHandler: WithRequirements<Spec<RedeemLoyaltyPointsHandler, 'scoped'>, 'request'>;
-};
-
-const ledgerModule = defineBoundedContext<LedgerProvides>({
-  name: 'Ledger',
-  commandDeps: [
-    DI_TOKENS.LEDGER.RECORD_SETTLEMENT_HANDLER,
-    DI_TOKENS.LEDGER.REDEEM_LOYALTY_HANDLER,
-  ],
-  queryDeps: [
-    DI_TOKENS.LEDGER.GET_RESTAURANT_LEDGER_HANDLER,
-    DI_TOKENS.LEDGER.GET_USER_LOYALTY_HANDLER,
-  ],
-  module: (container) =>
-    container
-      .registerClass(
-        DI_TOKENS.LEDGER.REPO,
-        LedgerRepository,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.EVENT_STORE,
-          DI_TOKENS.CORE.EVENT_BUS,
-        ],
-        'singleton',
-      )
-      .registerClass(
-        DI_TOKENS.LEDGER.LOYALTY_EVENT_HANDLER,
-        LoyaltyPointsEventHandler,
-        [
-          DI_TOKENS.LEDGER.REPO,
-        ],
-        'singleton',
-      )
-      .registerClass(
-        DI_TOKENS.LEDGER.GET_RESTAURANT_LEDGER_HANDLER,
-        GetRestaurantLedgerHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.AUTHZ,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.LEDGER.GET_USER_LOYALTY_HANDLER,
-        GetUserLoyaltyBalanceHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.AUTHZ,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.LEDGER.RECORD_SETTLEMENT_HANDLER,
-        RecordOrderSettlementHandler,
-        [
-          DI_TOKENS.LEDGER.REPO,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.LEDGER.REDEEM_LOYALTY_HANDLER,
-        RedeemLoyaltyPointsHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.LEDGER.REPO,
-          DI_TOKENS.CORE.AUTHZ,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      ),
-  commands: (c, commandBus) => {
-    commandBus.register('RecordOrderSettlement', c.get(DI_TOKENS.LEDGER.RECORD_SETTLEMENT_HANDLER));
-    commandBus.register('RedeemLoyaltyPoints', c.get(DI_TOKENS.LEDGER.REDEEM_LOYALTY_HANDLER), {
-      requiredPermission: 'loyalty:redeem',
-    });
-  },
-  queries: (c, queryBus) => {
+    queryBus.register('GetOrderById', c.get(DI_TOKENS.ORDERS.GET_ORDER_BY_ID_HANDLER));
     queryBus.register(
-      'GetRestaurantLedger',
-      c.get(DI_TOKENS.LEDGER.GET_RESTAURANT_LEDGER_HANDLER),
-      {
-        requiredPermission: 'ledger:read',
-      },
+      'GetOrderEventsSince',
+      c.get(DI_TOKENS.ORDERS.GET_ORDER_EVENTS_SINCE_HANDLER),
     );
-    queryBus.register('GetUserLoyaltyBalance', c.get(DI_TOKENS.LEDGER.GET_USER_LOYALTY_HANDLER), {
-      requiredPermission: 'loyalty:read',
-    });
   },
   subscribers: (scope, bus) => {
-    scope.get(DI_TOKENS.LEDGER.LOYALTY_EVENT_HANDLER).register(bus);
+    scope.get(DI_TOKENS.ORDERS.ORDER_SAGA).register(bus);
+    scope.get(DI_TOKENS.ORDERS.CHECKOUT_SAGA).register(bus);
   },
 });
 
 // ============================================================================
 // REGISTERING BOUNDED CONTEXTS & COMPOSING ROOT CONTAINER
 // 1. `BOUNDED_CONTEXTS` drives automatic CQRS bus and event subscriber wiring.
-// 2. `domainContainer` merges all context modules plus cross-context sagas.
+// 2. `domainContainer` merges all strictly isolated bounded context modules.
 // 3. `rootContainer` registers request-scoped CQRS buses and HTTP controllers.
 // ============================================================================
 
 const BOUNDED_CONTEXTS = [
   identityModule,
   catalogModule,
-  orderingModule,
-  ledgerModule,
+  loyaltyModule,
+  billingModule,
+  ordersModule,
 ] as const;
 
-// Composes all bounded context modules onto `coreContainer`.
-// Edge case: `OrderSettlementSaga` is registered here (after `ledgerModule`) because
-// it depends on both `DI_TOKENS.LEDGER.REPO` and `DI_TOKENS.CORE.SAGA_REPO`.
+// Composes all strictly isolated bounded context modules onto `coreContainer`.
+// Every module depends solely on `CoreDeps` and communicates across boundaries via `EventBus`.
 const domainContainer = coreContainer
   .use(identityModule.module)
   .use(catalogModule.module)
-  .use(orderingModule.module)
-  .use(ledgerModule.module)
-  .registerClass(
-    DI_TOKENS.ORDERING.ORDER_SAGA,
-    OrderSettlementSaga,
-    [
-      DI_TOKENS.LEDGER.REPO,
-      DI_TOKENS.CORE.SAGA_REPO,
-    ],
-    'singleton',
-  );
+  .use(loyaltyModule.module)
+  .use(billingModule.module)
+  .use(ordersModule.module);
 
-type DomainResolved = Container.Resolve<typeof domainContainer>;
+export type DomainResolved = Container.Resolve<typeof domainContainer>;
 
 export const rootContainer = domainContainer
   // Registers request-scoped CommandBus after all context command handlers are bound.
@@ -1063,6 +1354,7 @@ export const rootContainer = domainContainer
     ],
     'scoped',
   )
+
   // HTTP controllers are 'scoped' per request so they receive request-bound buses and context.
   // Edge case: `CatalogController` omits `DI_TOKENS.CORE.REQUEST` because storefront menu
   // reads are public and tenant-specific mutations extract `restaurantId` via handlers.
@@ -1087,8 +1379,8 @@ export const rootContainer = domainContainer
     'scoped',
   )
   .registerClass(
-    DI_TOKENS.ORDERING.CONTROLLER,
-    OrderController,
+    DI_TOKENS.LOYALTY.CONTROLLER,
+    LoyaltyController,
     [
       DI_TOKENS.CORE.COMMAND_BUS,
       DI_TOKENS.CORE.QUERY_BUS,
@@ -1097,11 +1389,25 @@ export const rootContainer = domainContainer
     'scoped',
   )
   .registerClass(
-    DI_TOKENS.LEDGER.CONTROLLER,
-    LedgerController,
+    DI_TOKENS.BILLING.CONTROLLER,
+    BillingController,
     [
       DI_TOKENS.CORE.COMMAND_BUS,
       DI_TOKENS.CORE.QUERY_BUS,
+      DI_TOKENS.CORE.REQUEST,
+    ],
+    'scoped',
+  )
+  .registerClass(
+    DI_TOKENS.ORDERS.CONTROLLER,
+    OrderController,
+    [
+      DI_TOKENS.CORE.COMMAND_BUS,
+      DI_TOKENS.CORE.QUERY_BUS,
+      DI_TOKENS.ORDERS.CART_SERVICE,
+      DI_TOKENS.ORDERS.REPO,
+      DI_TOKENS.ORDERS.DELIVERY_PROVIDER,
+      DI_TOKENS.CORE.EVENT_BUS,
       DI_TOKENS.CORE.REQUEST,
     ],
     'scoped',
@@ -1115,6 +1421,8 @@ export interface ScopeServices {
   eventBus: EventBus;
   eventStore: PgEventStore;
   sagaRepo: PgSagaRepository;
+  idempotencyStore: RedisIdempotencyStore;
+  clock: SystemClock;
   authz: AuthorizationPolicy;
   commandBus: CommandBus;
   queryBus: QueryBus;
@@ -1124,12 +1432,24 @@ export interface ScopeServices {
   branchStatusCache: BranchStatusCache;
   menuCacheHandler: MenuCacheInvalidationHandler;
   catalogController: CatalogController;
+  loyaltyRepo: LoyaltyRepository;
+  loyaltySettlementService: LoyaltySettlementService;
+  loyaltySettlementEventHandler: LoyaltySettlementEventHandler;
+  loyaltyController: LoyaltyController;
+  billingRepo: BillingRepository;
+  paymentGateway: DeterministicMockGateway;
+  cardTerminal: MockCardTerminalAdapter;
+  billingSettlementService: BillingSettlementService;
+  billingSettlementEventHandler: BillingSettlementEventHandler;
+  billingController: BillingController;
   orderRepo: OrderRepository;
-  orderController: OrderController;
+  cartService: RedisCartService;
+  orderGateway: DeterministicOrderGatewayAdapter;
+  deliveryProvider: SimulatedUkCourierAdapter;
+  notifier: ConsoleCaptureNotifier;
   orderSaga: OrderSettlementSaga;
-  ledgerRepo: LedgerRepository;
-  loyaltyEventHandler: LoyaltyPointsEventHandler;
-  ledgerController: LedgerController;
+  orderCheckoutSaga: OrderCheckoutSaga;
+  orderController: OrderController;
 }
 
 export interface RequestScope {
@@ -1137,7 +1457,7 @@ export interface RequestScope {
   dispose(): Promise<void>;
 }
 
-// Subscribes all singleton domain event listeners to the process-wide `InMemoryEventBus`.
+// Subscribes all domain event listeners to the process-wide `InMemoryEventBus`.
 // Edge case: Uses a dedicated `bootScope` with `SYSTEM_CRON` privileges at module load time
 // so event handlers are registered exactly once rather than duplicated on every HTTP request.
 function registerDomainEventSubscribers(scope: RequestScope, bus: InMemoryEventBus): void {

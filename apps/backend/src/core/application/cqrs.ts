@@ -11,11 +11,11 @@ export interface Query<TResult> {
   readonly _resultType?: TResult;
 }
 
-export interface CommandHandler<TCommand extends Command<TResult>, TResult = void> {
+export interface CommandHandler<in TCommand extends Command<TResult>, TResult = void> {
   execute(command: TCommand): Promise<TResult>;
 }
 
-export interface QueryHandler<TQuery extends Query<TResult>, TResult> {
+export interface QueryHandler<in TQuery extends Query<TResult>, TResult> {
   execute(query: TQuery): Promise<TResult>;
 }
 
@@ -74,7 +74,7 @@ export class AuthorizingCommandHandlerDecorator<TCommand extends Command<TResult
   async execute(command: TCommand): Promise<TResult> {
     const check = this.authz.assertPermission(this.requiredPermission);
     if (!check.ok) {
-      return err(check.error) as unknown as TResult;
+      return err(check.error) as TResult;
     }
     return this.inner.execute(command);
   }
@@ -107,6 +107,9 @@ export class AuthorizingQueryHandlerDecorator<TQuery extends Query<TResult>, TRe
   }
 }
 
+type StoredCommandHandler = CommandHandler<never, unknown>;
+type StoredQueryHandler = QueryHandler<never, unknown>;
+
 export interface CommandBus {
   register<TCommand extends Command<TResult>, TResult>(
     commandName: string,
@@ -132,7 +135,7 @@ export interface QueryBus {
 }
 
 export class InMemoryCommandBus implements CommandBus {
-  private readonly handlers = new Map<string, CommandHandler<Command<unknown>, unknown>>();
+  private readonly handlers = new Map<string, StoredCommandHandler>();
   private readonly log: AppLogger;
   private readonly authz?: AuthorizationPolicy;
 
@@ -155,7 +158,7 @@ export class InMemoryCommandBus implements CommandBus {
       );
     }
     const decorated = new LoggingCommandHandlerDecorator(wrapped, commandName, this.log);
-    this.handlers.set(commandName, decorated as CommandHandler<Command<unknown>, unknown>);
+    this.handlers.set(commandName, decorated);
   }
 
   async dispatch<TResult, TPayload extends object = Record<string, unknown>>(
@@ -166,12 +169,12 @@ export class InMemoryCommandBus implements CommandBus {
     if (!handler) {
       throw new Error(`No CommandHandler registered for: ${commandName}`);
     }
-    return (await handler.execute(command as Command<unknown>)) as TResult;
+    return (await (handler as CommandHandler<TPayload, TResult>).execute(command)) as TResult;
   }
 }
 
 export class InMemoryQueryBus implements QueryBus {
-  private readonly handlers = new Map<string, QueryHandler<Query<unknown>, unknown>>();
+  private readonly handlers = new Map<string, StoredQueryHandler>();
   private readonly authz?: AuthorizationPolicy;
 
   constructor(authz?: AuthorizationPolicy) {
@@ -191,7 +194,7 @@ export class InMemoryQueryBus implements QueryBus {
         options.requiredPermission,
       );
     }
-    this.handlers.set(queryName, wrapped as QueryHandler<Query<unknown>, unknown>);
+    this.handlers.set(queryName, wrapped);
   }
 
   async ask<TResult, TPayload extends object = Record<string, unknown>>(
@@ -202,6 +205,6 @@ export class InMemoryQueryBus implements QueryBus {
     if (!handler) {
       throw new Error(`No QueryHandler registered for: ${queryName}`);
     }
-    return (await handler.execute(query as Query<unknown>)) as TResult;
+    return (await (handler as QueryHandler<TPayload, TResult>).execute(query)) as TResult;
   }
 }

@@ -17,11 +17,14 @@
     "db:codegen": "tsx --env-file=../../.env src/codegen.ts",
     "db:migrate": "tsx --env-file=../../.env src/setup.ts && pnpm db:codegen",
     "db:seed": "tsx --env-file=../../.env src/seed.ts",
+    "db:seed:bundle": "tsx src/bundle-sql.ts --seeds",
+    "db:migrations:bundle": "tsx src/bundle-sql.ts --migrations",
+    "db:bundle": "pnpm db:migrations:bundle && pnpm db:seed:bundle",
     "format:migrations": "for f in migrations/*.sql; do sql-formatter -c sql-formatter.json --fix \"$f\"; done",
     "format:seeds": "for f in seeds/*.sql; do sql-formatter -c sql-formatter.json --fix \"$f\"; done",
-    "format": "biome format --write src && pnpm format:migrations && pnpm format:seeds",
-    "lint": "biome lint src",
-    "fixed": "biome check --write src"
+    "format": "biome format --write src generated && pnpm format:migrations && pnpm format:seeds",
+    "lint": "biome lint src generated",
+    "fixed": "biome check --write src generated"
   },
   "dependencies": {
     "pg": "^8.23.1",
