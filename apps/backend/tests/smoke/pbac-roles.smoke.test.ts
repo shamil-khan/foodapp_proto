@@ -12,6 +12,7 @@ describe('PBAC Rights, Custom Roles & Privilege Guards', () => {
   const handle = `pbac-brand-${Date.now()}`;
   const ownerEmail = `owner@${handle}.example.com`;
 
+  // FILE: apps/backend/tests/smoke/pbac-roles.smoke.test.ts (Lines 15-75)
   let primaryBranchId = '';
   let secondaryBranchId = '';
   let ownerToken = '';
@@ -52,7 +53,7 @@ describe('PBAC Rights, Custom Roles & Privilege Guards', () => {
     const secondBranch = await client.post<{
       branchId: string;
     }>(
-      '/api/brands/pos/branches',
+      '/api/pos/brands/branches',
       {
         name: 'Piccadilly Branch',
         city: 'Manchester',
@@ -68,6 +69,24 @@ describe('PBAC Rights, Custom Roles & Privilege Guards', () => {
     );
     expect(secondBranch.status).toBe(201);
     secondaryBranchId = secondBranch.body.branchId;
+
+    const rolesRes = await client.get<{
+      roles: RoleSummary[];
+    }>('/api/pos/roles', {
+      token: ownerToken,
+    });
+    const brandOwnerRoleId = rolesRes.body.roles.find((r) => r.name === 'BRAND_OWNER')?.id ?? '';
+    const assignSecondary = await client.patch(
+      `/api/pos/staff/${ownerStaffId}/branch-access`,
+      {
+        branchId: secondaryBranchId,
+        roleId: brandOwnerRoleId,
+      },
+      {
+        token: ownerToken,
+      },
+    );
+    expect(assignSecondary.status).toBe(200);
   });
 
   it('lists 18 rights and predefined brand roles', async () => {

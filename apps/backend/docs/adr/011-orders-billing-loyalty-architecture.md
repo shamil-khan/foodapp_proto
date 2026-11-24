@@ -1,4 +1,4 @@
-# ADR: Multi-Channel Orders, Double-Entry Billing & Multi-Scope Loyalty Architecture
+# ADR-011: Multi-Channel Orders, Double-Entry Billing & Multi-Scope Loyalty Architecture
 
 - **Status:** Implemented & Verified
 

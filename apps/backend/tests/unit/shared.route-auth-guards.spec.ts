@@ -3,7 +3,8 @@ import { SYSTEM_ACTORS } from '@foodapp/db';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { describe, expect, it } from 'vitest';
 import { billingRoutes } from '@/billing/services/billing-routes';
-import { adminCatalogRoutes, catalogRoutes } from '@/catalog/services/catalog-routes';
+import { adminBrandRoutes, brandRoutes, posBrandRoutes } from '@/brand/services/brand-routes';
+import { catalogRoutes, posCatalogRoutes } from '@/catalog/services/catalog-routes';
 import type { AppEnv } from '@/container';
 import {
   AuthorizationPolicy,
@@ -34,8 +35,11 @@ function buildAppWithActor(actor: RequestContext) {
 
   app.route('/api', iamRoutes);
   app.route('/api/pos/support-tickets', supportRoutes);
-  app.route('/api/brands', catalogRoutes);
-  app.route('/api/admin', adminCatalogRoutes);
+  app.route('/api/brands', brandRoutes);
+  app.route('/api/pos/brands', posBrandRoutes);
+  app.route('/api/admin', adminBrandRoutes);
+  app.route('/api/catalog', catalogRoutes);
+  app.route('/api/pos/catalog', posCatalogRoutes);
   app.route('/api/orders', createStorefrontOrderRoutes(store));
   app.route('/api/pos/orders', createPosOrderRoutes(store));
   app.route('/api/billing', billingRoutes);
@@ -47,7 +51,7 @@ function buildAppWithActor(actor: RequestContext) {
 describe('shared.route-auth-guards — Fail-Fast 401 & Three-Actor 403 Isolation', () => {
   const sampleUuid = '00000000-0000-4000-8000-000000000001';
 
-  it('returns 401 Unauthorized on all protected POS, Support, Catalog, Billing, Loyalty & Order routes when unauthenticated', async () => {
+  it('returns 401 Unauthorized on all protected POS, Support, Brand, Catalog, Billing, Loyalty & Order routes when unauthenticated', async () => {
     const app = buildAppWithActor({
       requestId: 'req-unauth',
       actorId: SYSTEM_ACTORS.SYSTEM_CRON,
@@ -113,42 +117,42 @@ describe('shared.route-auth-guards — Fail-Fast 401 & Three-Actor 403 Isolation
       ],
       [
         'POST',
-        '/api/brands/pos/branches',
+        '/api/pos/brands/branches',
         {},
       ],
       [
         'PATCH',
-        `/api/brands/pos/branches/${sampleUuid}/status`,
+        `/api/pos/brands/branches/${sampleUuid}/status`,
         {},
       ],
       [
         'PATCH',
-        `/api/brands/pos/branches/${sampleUuid}/settings`,
+        `/api/pos/brands/branches/${sampleUuid}/settings`,
         {},
       ],
       [
         'POST',
-        `/api/brands/pos/branches/${sampleUuid}/whitelist`,
+        `/api/pos/brands/branches/${sampleUuid}/whitelist`,
         {},
       ],
       [
         'PUT',
-        '/api/brands/pos/pricing-policy',
+        '/api/pos/catalog/pricing-policy',
         {},
       ],
       [
         'PUT',
-        `/api/brands/pos/branches/${sampleUuid}/menu/${sampleUuid}`,
+        `/api/pos/catalog/branches/${sampleUuid}/menu/${sampleUuid}`,
         {},
       ],
       [
         'POST',
-        `/api/brands/pos/branches/${sampleUuid}/menu/${sampleUuid}/review`,
+        `/api/pos/catalog/branches/${sampleUuid}/menu/${sampleUuid}/review`,
         {},
       ],
       [
         'POST',
-        '/api/brands/pos/items',
+        '/api/pos/catalog/items',
         {},
       ],
       [
@@ -229,7 +233,7 @@ describe('shared.route-auth-guards — Fail-Fast 401 & Three-Actor 403 Isolation
     expect(adminCreateTicket.status).toBe(403);
 
     const adminBranchWithoutTicket = await adminApp.request(
-      `/api/brands/pos/branches/${sampleUuid}/status`,
+      `/api/pos/brands/branches/${sampleUuid}/status`,
       {
         method: 'PATCH',
         headers: {

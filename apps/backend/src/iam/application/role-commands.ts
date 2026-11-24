@@ -2,6 +2,7 @@
 import {
   type PermissionEffect,
   type Pool,
+  RestaurantBranchTable,
   RestaurantStaffTable,
   StaffBranchAssignmentTable,
   StaffDirectPermissionTable,
@@ -540,10 +541,8 @@ export class AssignStaffBranchAccessHandler
     await this.pool.query(ins.text, ins.params);
   }
 
+  // FILE: apps/backend/src/iam/application/role-commands.ts (AssignStaffBranchAccessHandler.execute)
   async execute(cmd: AssignStaffBranchAccessCommand): Promise<Result<void>> {
-    const access = this.authz.assertBranchAccess(cmd.branchId, 'staff:manage');
-    if (!access.ok) return access;
-
     const sCols = RestaurantStaffTable.cols;
     const sQ = sqlSelect(RestaurantStaffTable)
       .select([
@@ -556,6 +555,31 @@ export class AssignStaffBranchAccessHandler
     const staff = (await this.pool.query<typeof sQ._result>(sQ.text, sQ.params)).rows[0];
     if (!staff)
       return err(new DomainError('STAFF_NOT_FOUND', `Staff member ${cmd.staffId} not found.`, 404));
+
+    const access = this.authz.assertRestaurantAccess(staff.restaurantId, 'staff:manage');
+    if (!access.ok) return access;
+
+    const branchId = cmd.branchId ?? this.request.branchId;
+    if (!branchId) return err(new DomainError('MISSING_BRANCH', 'branchId is required.', 400));
+
+    const bCols = RestaurantBranchTable.cols;
+    const bQ = sqlSelect(RestaurantBranchTable)
+      .select([
+        bCols.id,
+      ])
+      .whereEq(bCols.id, branchId)
+      .whereEq(bCols.restaurantId, staff.restaurantId)
+      .activeOnly()
+      .compile();
+    const targetBranch = (await this.pool.query<typeof bQ._result>(bQ.text, bQ.params)).rows[0];
+    if (!targetBranch)
+      return err(
+        new DomainError(
+          'BRANCH_FORBIDDEN',
+          `Branch ${branchId} does not belong to brand ${staff.restaurantId}.`,
+          403,
+        ),
+      );
 
     const rCols = StaffRoleTable.cols;
     const rQ = sqlSelect(StaffRoleTable)

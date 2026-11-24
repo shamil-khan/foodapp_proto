@@ -1,5 +1,7 @@
+// FILE: apps/backend/src/catalog/infrastructure/catalog-repository.ts (Part 1 of 3)
 import {
   BranchMenuOverrideTable,
+  CatalogBranchProjectionTable,
   CategoryTable,
   ItemModifierTable,
   type KdsRoutingTarget,
@@ -7,8 +9,6 @@ import {
   type MenuSelectionMode,
   MenuSnapshotTable,
   type Pool,
-  RestaurantBranchTable,
-  RestaurantTable,
   sqlInsert,
   sqlSelect,
   sqlUpdate,
@@ -92,7 +92,7 @@ export class CatalogRepository {
       restaurantId,
     };
   }
-
+  // FILE: apps/backend/src/catalog/infrastructure/catalog-repository.ts (Part 2 of 3)
   private async fetchModifiersByItem(
     itemIds: readonly string[],
   ): Promise<Map<string, SnapshotModifierDto[]>> {
@@ -243,7 +243,7 @@ export class CatalogRepository {
       });
     }
   }
-
+  // FILE: apps/backend/src/catalog/infrastructure/catalog-repository.ts (Part 3 of 3)
   private async persistCompiledSnapshot(
     branchId: string,
     compiled: CompiledMenuSnapshot,
@@ -289,57 +289,47 @@ export class CatalogRepository {
     await this.pool.query(insertSnap.text, insertSnap.params);
   }
 
+  /**
+   * Compiles the branch menu snapshot strictly from `CatalogBranchProjectionTable`
+   * without querying `Restaurant` or `RestaurantBranch` tables in `brand`.
+   */
   async rebuildAndPersistSnapshot(
     branchId: string,
     actorId: string,
   ): Promise<CompiledMenuSnapshot | null> {
-    const bCols = RestaurantBranchTable.cols;
-    const branchQuery = sqlSelect(RestaurantBranchTable)
+    const pCols = CatalogBranchProjectionTable.cols;
+    const projQuery = sqlSelect(CatalogBranchProjectionTable)
       .select([
-        bCols.id,
-        bCols.restaurantId,
-        bCols.name,
-        bCols.postcodeSector,
-        bCols.menuSelectionMode,
+        pCols.branchId,
+        pCols.restaurantId,
+        pCols.brandName,
+        pCols.branchName,
+        pCols.postcodeSector,
+        pCols.menuSelectionMode,
       ])
-      .whereEq(bCols.id, branchId)
+      .whereEq(pCols.branchId, branchId)
       .activeOnly()
       .compile();
 
-    const branchRes = await this.pool.query<typeof branchQuery._result>(
-      branchQuery.text,
-      branchQuery.params,
+    const projRes = await this.pool.query<typeof projQuery._result>(
+      projQuery.text,
+      projQuery.params,
     );
-    const branch = branchRes.rows[0];
+    const branch = projRes.rows[0];
     if (!branch) return null;
-
-    const rCols = RestaurantTable.cols;
-    const restQuery = sqlSelect(RestaurantTable)
-      .select([
-        rCols.name,
-      ])
-      .whereEq(rCols.id, branch.restaurantId)
-      .activeOnly()
-      .compile();
-
-    const restRes = await this.pool.query<typeof restQuery._result>(
-      restQuery.text,
-      restQuery.params,
-    );
-    const brandName = restRes.rows[0]?.name ?? branch.name;
 
     const builder = new MenuSnapshotBuilder().setBranchContext({
       restaurantId: branch.restaurantId,
-      branchId: branch.id,
-      brandName,
-      branchName: branch.name,
+      branchId: branch.branchId,
+      brandName: branch.brandName,
+      branchName: branch.branchName,
       postcodeSector: branch.postcodeSector,
     });
 
     await this.populateBranchMenuGraph({
       builder,
       restaurantId: branch.restaurantId,
-      branchId: branch.id,
+      branchId: branch.branchId,
       menuSelectionMode: branch.menuSelectionMode as MenuSelectionMode,
     });
     const compiled = builder.build();

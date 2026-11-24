@@ -1,6 +1,7 @@
 import * as crypto from 'node:crypto';
 import {
   BranchMenuOverrideTable,
+  CatalogBranchProjectionTable,
   CategoryTable,
   type KdsRoutingTarget,
   MenuItemTable,
@@ -8,7 +9,6 @@ import {
   type Pool,
   type PriceApprovalStatus,
   PricingPolicyTable,
-  RestaurantBranchTable,
   sqlInsert,
   sqlSelect,
   sqlUpdate,
@@ -278,15 +278,17 @@ export class UpsertBranchMenuOverrideHandler
     );
     if (!access.ok) return access;
 
-    const bCols = RestaurantBranchTable.cols;
-    const bQ = sqlSelect(RestaurantBranchTable)
+    // FILE: apps/backend/src/catalog/application/pricing-policy-commands.ts (UpsertBranchMenuOverrideHandler branch lookup)
+    const bCols = CatalogBranchProjectionTable.cols;
+    const bQ = sqlSelect(CatalogBranchProjectionTable)
       .select([
-        bCols.id,
+        bCols.branchId,
         bCols.restaurantId,
       ])
-      .whereEq(bCols.id, cmd.branchId)
+      .whereEq(bCols.branchId, cmd.branchId)
       .activeOnly()
       .compile();
+
     const branch = (await this.pool.query<typeof bQ._result>(bQ.text, bQ.params)).rows[0];
     if (!branch) return err(new DomainError('BRANCH_NOT_FOUND', 'Branch not found.', 404));
 

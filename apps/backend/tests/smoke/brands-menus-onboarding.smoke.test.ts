@@ -1,3 +1,4 @@
+// FILE: apps/backend/tests/smoke/brands-menus-onboarding.smoke.test.ts
 import { describe, expect, it } from 'vitest';
 import { ApiTestClient } from '../helpers/api-client.js';
 
@@ -48,17 +49,17 @@ describe('Brands, Privacy Redaction, Menus & Seller Onboarding', () => {
 
   it('fetches branch menu snapshots, hashtag filters, and 404 on unknown branch', async () => {
     const didsburyMenu = await client.get(
-      '/api/brands/branches/b0000000-0000-4000-8000-000000000005/menu',
+      '/api/catalog/branches/b0000000-0000-4000-8000-000000000005/menu',
     );
     expect(didsburyMenu.status).toBe(200);
 
     const taggedMenu = await client.get(
-      '/api/brands/branches/b0000000-0000-4000-8000-000000000004/menu?tag=cheese',
+      '/api/catalog/branches/b0000000-0000-4000-8000-000000000004/menu?tag=cheese',
     );
     expect(taggedMenu.status).toBe(200);
 
     const missingMenu = await client.get(
-      '/api/brands/branches/00000000-0000-4000-8000-999999999999/menu',
+      '/api/catalog/branches/00000000-0000-4000-8000-999999999999/menu',
     );
     expect(missingMenu.status).toBe(404);
   });
@@ -98,8 +99,8 @@ describe('Brands, Privacy Redaction, Menus & Seller Onboarding', () => {
 
     const reserved = await client.post('/api/brands/register', {
       ...basePayload,
-      brandName: 'Branches Cafe',
-      handle: 'branches',
+      brandName: 'Admin Cafe',
+      handle: 'admin',
       kitchenType: 'RESTAURANT_BRANCH',
       ownerEmail: `mia-${Date.now()}@example.com`,
     });

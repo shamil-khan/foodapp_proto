@@ -1,10 +1,12 @@
+// FILE: apps/backend/src/brand/application/admin-brand-commands.ts
 import { type KitchenType, type Pool, RestaurantTable, sqlUpdate } from '@foodapp/db';
 import {
   type RegisterBrandCommand,
   RegisterBrandHandler,
-} from '@/catalog/application/branch-commands';
+} from '@/brand/application/brand-commands';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
+import type { EventBus } from '@/core/application/event-bus';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
 
 export interface CreateRestaurantByAdminCommand
@@ -44,11 +46,13 @@ export class CreateRestaurantByAdminHandler
     >
 {
   private readonly pool: Pool;
+  private readonly eventBus: EventBus;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
+  constructor(pool: Pool, eventBus: EventBus, authz: AuthorizationPolicy, request: RequestContext) {
     this.pool = pool;
+    this.eventBus = eventBus;
     this.authz = authz;
     this.request = request;
   }
@@ -64,7 +68,7 @@ export class CreateRestaurantByAdminHandler
     const permCheck = this.authz.assertPermission('platform:restaurants:manage');
     if (!permCheck.ok) return permCheck;
 
-    const registerHandler = new RegisterBrandHandler(this.pool, this.request);
+    const registerHandler = new RegisterBrandHandler(this.pool, this.eventBus, this.request);
     const registerCmd: RegisterBrandCommand = {
       brandName: cmd.name,
       handle: cmd.handle,

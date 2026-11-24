@@ -278,3 +278,32 @@ SET
     WHEN "kitchenType" = 'CLOUD_KITCHEN' THEN 'stuart'
     ELSE NULL
   END;
+
+
+INSERT INTO
+  "CatalogBranchProjection" (
+    "branchId",
+    "restaurantId",
+    "brandName",
+    "branchName",
+    "postcodeSector",
+    "menuSelectionMode",
+    "createdBy",
+    "updatedBy"
+  )
+SELECT
+  b."id",
+  b."restaurantId",
+  r."name",
+  b."name",
+  b."postcodeSector",
+  b."menuSelectionMode",
+  b."createdBy",
+  b."updatedBy"
+FROM
+  "RestaurantBranch" b
+  JOIN "Restaurant" r ON r."id" = b."restaurantId"
+WHERE
+  b."deletedAt" IS NULL
+  AND r."deletedAt" IS NULL
+ON CONFLICT ("branchId") DO NOTHING;

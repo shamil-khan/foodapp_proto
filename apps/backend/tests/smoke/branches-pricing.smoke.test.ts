@@ -1,9 +1,11 @@
+// FILE: apps/backend/tests/smoke/branches-pricing.smoke.test.ts (Part 1 of 2)
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ApiTestClient, loginPosStaff } from '../helpers/api-client.js';
 
 describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
   const client = new ApiTestClient();
   const cliftonBranchId = 'b0000000-0000-4000-8000-000000000006';
+  const tomStaffId = 'c0000000-0000-4000-8000-000000000007';
   const uniqueBranchKey = `headingley-${Date.now()}`;
   let ownerToken = '';
   let createdBranchId = '';
@@ -33,7 +35,7 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
       branchId: string;
       cityKey: string;
       branchKey: string;
-    }>('/api/brands/pos/branches', branchPayload, {
+    }>('/api/pos/brands/branches', branchPayload, {
       token: ownerToken,
     });
     expect(created.status).toBe(201);
@@ -43,7 +45,7 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
 
     const dup = await client.post<{
       code: string;
-    }>('/api/brands/pos/branches', branchPayload, {
+    }>('/api/pos/brands/branches', branchPayload, {
       token: ownerToken,
     });
     expect(dup.status).toBe(409);
@@ -51,6 +53,27 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
   });
 
   it('sets BUSY_PAUSED lock (200), enforces cooldown (409), and updates settings/whitelist', async () => {
+    const rolesRes = await client.get<{
+      roles: Array<{
+        id: string;
+        name: string;
+      }>;
+    }>('/api/pos/roles', {
+      token: ownerToken,
+    });
+    const ownerRoleId = rolesRes.body.roles.find((r) => r.name === 'BRAND_OWNER')?.id ?? '';
+    const assign = await client.patch(
+      `/api/pos/staff/${tomStaffId}/branch-access`,
+      {
+        branchId: createdBranchId,
+        roleId: ownerRoleId,
+      },
+      {
+        token: ownerToken,
+      },
+    );
+    expect(assign.status).toBe(200);
+
     const branchToken = await loginPosStaff(client, {
       brandHandle: 'pizza-hut',
       email: 'tom@pizza-hut.com',
@@ -61,7 +84,7 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
     const pause = await client.patch<{
       operationalStatus: string;
     }>(
-      `/api/brands/pos/branches/${createdBranchId}/status`,
+      `/api/pos/brands/branches/${createdBranchId}/status`,
       {
         operationalStatus: 'BUSY_PAUSED',
         reason: 'Oven maintenance',
@@ -76,7 +99,7 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
     const cooldown = await client.patch<{
       code: string;
     }>(
-      `/api/brands/pos/branches/${createdBranchId}/status`,
+      `/api/pos/brands/branches/${createdBranchId}/status`,
       {
         operationalStatus: 'OPEN',
       },
@@ -88,7 +111,7 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
     expect(cooldown.body.code).toBe('STATUS_COOLDOWN_ACTIVE');
 
     const settings = await client.patch(
-      `/api/brands/pos/branches/${createdBranchId}/settings`,
+      `/api/pos/brands/branches/${createdBranchId}/settings`,
       {
         supportsTakeaway: true,
         menuSelectionMode: 'ALL_BRAND_ITEMS',
@@ -100,7 +123,7 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
     expect(settings.status).toBe(200);
 
     const whitelist = await client.post(
-      `/api/brands/pos/branches/${createdBranchId}/whitelist`,
+      `/api/pos/brands/branches/${createdBranchId}/whitelist`,
       {
         customerUserId: '11111111-1111-4111-8111-111111111112',
         decision: 'APPROVED',
@@ -111,12 +134,12 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
     );
     expect(whitelist.status).toBe(200);
   });
-
+  // FILE: apps/backend/tests/smoke/branches-pricing.smoke.test.ts (Part 2 of 2)
   it('creates branch menu item, updates PricingPolicy, applies override, and handles 404 review', async () => {
     const itemOk = await client.post<{
       menuItemId: string;
     }>(
-      '/api/brands/pos/items',
+      '/api/pos/catalog/items',
       {
         categoryId: 'd0000000-0000-4000-8000-000000000005',
         branchId: cliftonBranchId,
@@ -136,7 +159,7 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
     expect(itemOk.status).toBe(201);
 
     const itemBadCategory = await client.post(
-      '/api/brands/pos/items',
+      '/api/pos/catalog/items',
       {
         categoryId: '00000000-0000-4000-8000-999999999999',
         name: 'Invalid Category Item',
@@ -149,7 +172,7 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
     expect(itemBadCategory.status).toBe(404);
 
     const policy = await client.put(
-      '/api/brands/pos/pricing-policy',
+      '/api/pos/catalog/pricing-policy',
       {
         menuPricingMode: 'BRANCH_DIRECT',
         maxDirectPriceDeltaPercent: 20,
@@ -167,7 +190,7 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
 
     const menuItemId = 'e0000000-0000-4000-8000-000000000006';
     const override = await client.put(
-      `/api/brands/pos/branches/${cliftonBranchId}/menu/${menuItemId}`,
+      `/api/pos/catalog/branches/${cliftonBranchId}/menu/${menuItemId}`,
       {
         isIncluded: true,
         isAvailable: true,
@@ -180,7 +203,7 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
     expect(override.status).toBe(200);
 
     const missingReview = await client.post(
-      `/api/brands/pos/branches/${cliftonBranchId}/menu/${menuItemId}/review`,
+      `/api/pos/catalog/branches/${cliftonBranchId}/menu/${menuItemId}/review`,
       {
         decision: 'APPROVED',
       },

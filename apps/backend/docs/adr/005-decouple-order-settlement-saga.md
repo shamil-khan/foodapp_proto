@@ -2,7 +2,7 @@
 
 # ADR-005: Decouple OrderSettlementSaga from Ledger Infrastructure
 
-- **Status:** Proposed
+- **Status:** uperseded by [ADR-011: Multi-Channel Orders, Double-Entry Billing & Multi-Scope Loyalty Architecture](./011-orders-billing-loyalty-architecture.md)
 - **Target Package:** `apps/backend` (`@foodapp/backend`)
 - **Agent Protocol:** [Backend AI Agent Execution Protocol](./_templates/agent-protocol.md)
 - **Tech Stack & System Baseline:** [Backend Tech Stack & System Baseline](./_templates/tech-stack.md)

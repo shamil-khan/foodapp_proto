@@ -2,7 +2,7 @@
 
 # ADR-006: Enforce HTTP Route-Level Permission Guards in `order-routes.ts`
 
-- **Status:** Proposed
+- **Status:** Superseded by [ADR-012: Unified IAM Policy Engine, Brand-Authorized JIT Support Tickets & HTTP Route Guards](./012-iam-policy-engine-jit-support-route-guards.md)
 - **Target Package:** `apps/backend` (`@foodapp/backend`)
 - **Agent Protocol:** [Backend AI Agent Execution Protocol](./_templates/agent-protocol.md)
 - **Tech Stack & System Baseline:** [Backend Tech Stack & System Baseline](./_templates/tech-stack.md)

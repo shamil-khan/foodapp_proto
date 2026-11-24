@@ -1,3 +1,4 @@
+// FILE: apps/backend/src/container.ts (Complete Imports — Part 1 of 2)
 import { ALL_PERMISSIONS, type Pool, pgPool, redisClient, SYSTEM_ACTORS } from '@foodapp/db';
 import type { InferdiHonoScopeEnv } from '@inferdi/hono';
 import {
@@ -21,15 +22,24 @@ import { BillingController } from '@/billing/services/billing-controller';
 import {
   CreateRestaurantByAdminHandler,
   UpdateRestaurantStatusByAdminHandler,
-} from '@/catalog/application/admin-restaurant-commands';
+} from '@/brand/application/admin-brand-commands';
 import {
   CreateBrandBranchHandler,
   RegisterBrandHandler,
   ReviewTakeawayWhitelistHandler,
   UpdateBranchOperationalStatusHandler,
   UpdateBranchSettingsHandler,
-} from '@/catalog/application/branch-commands';
-import { MenuCacheInvalidationHandler } from '@/catalog/application/cache-invalidation-handler';
+} from '@/brand/application/brand-commands';
+import { BrandOnboardingSaga } from '@/brand/application/brand-onboarding-saga';
+import {
+  ListBrandsHandler,
+  ResolveBranchBySlugHandler,
+  ResolveBrandByHandleHandler,
+} from '@/brand/application/queries';
+import { BranchStatusCache } from '@/brand/infrastructure/branch-status-cache';
+import { BrandController } from '@/brand/services/brand-controller';
+import { BrandCatalogOnboardingHandler } from '@/catalog/application/brand-catalog-onboarding-handlers';
+import { BranchCatalogSyncSaga } from '@/catalog/application/brand-catalog-sync-saga';
 import { UpdateMenuItemPriceHandler } from '@/catalog/application/commands';
 import {
   CreateMenuItemHandler,
@@ -37,13 +47,7 @@ import {
   UpsertBranchMenuOverrideHandler,
   UpsertPricingPolicyHandler,
 } from '@/catalog/application/pricing-policy-commands';
-import {
-  GetBranchMenuSnapshotHandler,
-  ListBrandsHandler,
-  ResolveBranchBySlugHandler,
-  ResolveBrandByHandleHandler,
-} from '@/catalog/application/queries';
-import { BranchStatusCache } from '@/catalog/infrastructure/branch-status-cache';
+import { GetBranchMenuSnapshotHandler } from '@/catalog/application/queries';
 import { CatalogRepository } from '@/catalog/infrastructure/catalog-repository';
 import { CatalogController } from '@/catalog/services/catalog-controller';
 import { AuthorizationPolicy, type RequestContext } from '@/core/application/authorization';
@@ -57,7 +61,9 @@ import { type EventBus, InMemoryEventBus } from '@/core/application/event-bus';
 import { PgEventStore } from '@/core/infrastructure/pg-event-store';
 import { PgSagaRepository } from '@/core/infrastructure/pg-saga-repository';
 import { RedisIdempotencyStore } from '@/core/services/idempotency-middleware';
+// FILE: apps/backend/src/container.ts (Complete Imports — Part 2 of 2)
 import { SwitchPosBranchHandler } from '@/iam/application/branch-switch-command';
+import { BrandIamOnboardingHandler } from '@/iam/application/brand-onboarding-handlers';
 import { LoginPosStaffHandler } from '@/iam/application/pos-login-command';
 import { GetCurrentActorHandler } from '@/iam/application/queries';
 import {
@@ -132,8 +138,11 @@ export const DI_TOKENS = {
     COMMAND_BUS: 'commandBus',
     QUERY_BUS: 'queryBus',
   },
+
+  // FILE: apps/backend/src/container.ts (DI_TOKENS.IAM, DI_TOKENS.BRAND, DI_TOKENS.CATALOG)
   IAM: {
     ROLE_PERMISSION_CACHE: 'rolePermissionCache',
+    BRAND_ONBOARDING_HANDLER: 'brandIamOnboardingHandler',
     LOGIN_POS_STAFF_HANDLER: 'loginPosStaffHandler',
     SWITCH_POS_BRANCH_HANDLER: 'switchPosBranchHandler',
     GET_ASSIGNABLE_PERMISSIONS_HANDLER: 'getAssignablePermissionsHandler',
@@ -145,47 +154,32 @@ export const DI_TOKENS = {
     ASSIGN_STAFF_BRANCH_ACCESS_HANDLER: 'assignStaffBranchAccessHandler',
     CONTROLLER: 'iamController',
   },
-  CATALOG: {
-    REPO: 'catalogRepo',
+  BRAND: {
     BRANCH_STATUS_CACHE: 'branchStatusCache',
+    ONBOARDING_SAGA: 'brandOnboardingSaga',
     LIST_BRANDS_HANDLER: 'listBrandsHandler',
     RESOLVE_BRAND_BY_HANDLE_HANDLER: 'resolveBrandByHandleHandler',
     RESOLVE_BRANCH_BY_SLUG_HANDLER: 'resolveBranchBySlugHandler',
-    GET_MENU_SNAPSHOT_HANDLER: 'getMenuSnapshotHandler',
-    MENU_CACHE_HANDLER: 'menuCacheHandler',
     REGISTER_BRAND_HANDLER: 'registerBrandHandler',
     CREATE_BRAND_BRANCH_HANDLER: 'createBrandBranchHandler',
     UPDATE_BRANCH_STATUS_HANDLER: 'updateBranchStatusHandler',
     UPDATE_BRANCH_SETTINGS_HANDLER: 'updateBranchSettingsHandler',
     REVIEW_TAKEAWAY_WHITELIST_HANDLER: 'reviewTakeawayWhitelistHandler',
+    CREATE_RESTAURANT_BY_ADMIN_HANDLER: 'createRestaurantByAdminHandler',
+    UPDATE_RESTAURANT_STATUS_BY_ADMIN_HANDLER: 'updateRestaurantStatusByAdminHandler',
+    CONTROLLER: 'brandController',
+  },
+  CATALOG: {
+    REPO: 'catalogRepo',
+    BRAND_ONBOARDING_HANDLER: 'brandCatalogOnboardingHandler',
+    BRANCH_SYNC_SAGA: 'branchCatalogSyncSaga',
+    GET_MENU_SNAPSHOT_HANDLER: 'getMenuSnapshotHandler',
     UPSERT_PRICING_POLICY_HANDLER: 'upsertPricingPolicyHandler',
     UPSERT_BRANCH_MENU_OVERRIDE_HANDLER: 'upsertBranchMenuOverrideHandler',
     REVIEW_PRICE_OVERRIDE_HANDLER: 'reviewPriceOverrideHandler',
     CREATE_MENU_ITEM_HANDLER: 'createMenuItemHandler',
-    CREATE_RESTAURANT_BY_ADMIN_HANDLER: 'createRestaurantByAdminHandler',
-    UPDATE_RESTAURANT_STATUS_BY_ADMIN_HANDLER: 'updateRestaurantStatusByAdminHandler',
     UPDATE_ITEM_PRICE_HANDLER: 'updateItemPriceHandler',
     CONTROLLER: 'catalogController',
-  },
-  LOYALTY: {
-    REPO: 'loyaltyRepo',
-    SETTLEMENT_SERVICE: 'loyaltySettlementService',
-    EVENT_HANDLER: 'loyaltySettlementEventHandler',
-    GET_CUSTOMER_LOYALTY_HANDLER: 'getCustomerLoyaltyHandler',
-    UPDATE_GOVERNANCE_HANDLER: 'updateLoyaltyGovernanceHandler',
-    AUDIT_ENTRY_HANDLER: 'auditLoyaltyEntryHandler',
-    CONTROLLER: 'loyaltyController',
-  },
-  BILLING: {
-    REPO: 'billingRepo',
-    GATEWAY: 'paymentGateway',
-    CARD_TERMINAL: 'cardTerminal',
-    SETTLEMENT_SERVICE: 'billingSettlementService',
-    EVENT_HANDLER: 'billingSettlementEventHandler',
-    GET_RESTAURANT_BILLING_HANDLER: 'getRestaurantBillingHandler',
-    REFUND_ORDER_HANDLER: 'refundOrderHandler',
-    SETTLE_MERCHANT_HANDLER: 'settleMerchantHandler',
-    CONTROLLER: 'billingController',
   },
   ORDERS: {
     REPO: 'orderRepo',
@@ -205,6 +199,26 @@ export const DI_TOKENS = {
     GET_ORDER_BY_ID_HANDLER: 'getOrderByIdHandler',
     GET_ORDER_EVENTS_SINCE_HANDLER: 'getOrderEventsSinceHandler',
     CONTROLLER: 'orderController',
+  },
+  BILLING: {
+    REPO: 'billingRepo',
+    GATEWAY: 'paymentGateway',
+    CARD_TERMINAL: 'cardTerminal',
+    SETTLEMENT_SERVICE: 'billingSettlementService',
+    EVENT_HANDLER: 'billingSettlementEventHandler',
+    GET_RESTAURANT_BILLING_HANDLER: 'getRestaurantBillingHandler',
+    REFUND_ORDER_HANDLER: 'refundOrderHandler',
+    SETTLE_MERCHANT_HANDLER: 'settleMerchantHandler',
+    CONTROLLER: 'billingController',
+  },
+  LOYALTY: {
+    REPO: 'loyaltyRepo',
+    SETTLEMENT_SERVICE: 'loyaltySettlementService',
+    EVENT_HANDLER: 'loyaltySettlementEventHandler',
+    GET_CUSTOMER_LOYALTY_HANDLER: 'getCustomerLoyaltyHandler',
+    UPDATE_GOVERNANCE_HANDLER: 'updateLoyaltyGovernanceHandler',
+    AUDIT_ENTRY_HANDLER: 'auditLoyaltyEntryHandler',
+    CONTROLLER: 'loyaltyController',
   },
   SUPPORT: {
     REPO: 'supportTicketRepository',
@@ -350,6 +364,241 @@ function defineBoundedContext<
 // handlers, and async domain event subscribers in one self-contained block.
 // ============================================================================
 
+// FILE: apps/backend/src/container.ts (brandModule — Part 1 of 3)
+// Declaring Brand bounded context:
+// Manages brand registration, multi-branch provisioning, daily operational status,
+// home-kitchen address privacy, and all-or-nothing `BrandOnboardingSaga` coordination.
+
+type BrandProvides = {
+  branchStatusCache: Spec<BranchStatusCache, 'singleton'>;
+  brandOnboardingSaga: Spec<BrandOnboardingSaga, 'singleton'>;
+  listBrandsHandler: Spec<ListBrandsHandler, 'singleton'>;
+  resolveBrandByHandleHandler: WithRequirements<
+    Spec<ResolveBrandByHandleHandler, 'scoped'>,
+    'request'
+  >;
+  resolveBranchBySlugHandler: WithRequirements<
+    Spec<ResolveBranchBySlugHandler, 'scoped'>,
+    'request'
+  >;
+  registerBrandHandler: WithRequirements<Spec<RegisterBrandHandler, 'scoped'>, 'request'>;
+  createBrandBranchHandler: WithRequirements<Spec<CreateBrandBranchHandler, 'scoped'>, 'request'>;
+  updateBranchStatusHandler: WithRequirements<
+    Spec<UpdateBranchOperationalStatusHandler, 'scoped'>,
+    'request'
+  >;
+  updateBranchSettingsHandler: WithRequirements<
+    Spec<UpdateBranchSettingsHandler, 'scoped'>,
+    'request'
+  >;
+  reviewTakeawayWhitelistHandler: WithRequirements<
+    Spec<ReviewTakeawayWhitelistHandler, 'scoped'>,
+    'request'
+  >;
+  createRestaurantByAdminHandler: WithRequirements<
+    Spec<CreateRestaurantByAdminHandler, 'scoped'>,
+    'request'
+  >;
+  updateRestaurantStatusByAdminHandler: WithRequirements<
+    Spec<UpdateRestaurantStatusByAdminHandler, 'scoped'>,
+    'request'
+  >;
+};
+
+const brandModule = defineBoundedContext<BrandProvides>({
+  name: 'Brand',
+  commandDeps: [
+    DI_TOKENS.BRAND.REGISTER_BRAND_HANDLER,
+    DI_TOKENS.BRAND.CREATE_BRAND_BRANCH_HANDLER,
+    DI_TOKENS.BRAND.UPDATE_BRANCH_STATUS_HANDLER,
+    DI_TOKENS.BRAND.UPDATE_BRANCH_SETTINGS_HANDLER,
+    DI_TOKENS.BRAND.REVIEW_TAKEAWAY_WHITELIST_HANDLER,
+    DI_TOKENS.BRAND.CREATE_RESTAURANT_BY_ADMIN_HANDLER,
+    DI_TOKENS.BRAND.UPDATE_RESTAURANT_STATUS_BY_ADMIN_HANDLER,
+  ],
+  queryDeps: [
+    DI_TOKENS.BRAND.LIST_BRANDS_HANDLER,
+    DI_TOKENS.BRAND.RESOLVE_BRAND_BY_HANDLE_HANDLER,
+    DI_TOKENS.BRAND.RESOLVE_BRANCH_BY_SLUG_HANDLER,
+  ],
+  // FILE: apps/backend/src/container.ts (brandModule — Part 2 of 3)
+  module: (container) =>
+    container
+      .registerClass(
+        DI_TOKENS.BRAND.BRANCH_STATUS_CACHE,
+        BranchStatusCache,
+        [
+          DI_TOKENS.CORE.REDIS,
+        ],
+        'singleton',
+      )
+      .registerClass(
+        DI_TOKENS.BRAND.ONBOARDING_SAGA,
+        BrandOnboardingSaga,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.SAGA_REPO,
+        ],
+        'singleton',
+      )
+      .registerClass(
+        DI_TOKENS.BRAND.LIST_BRANDS_HANDLER,
+        ListBrandsHandler,
+        [
+          DI_TOKENS.CORE.DB,
+        ],
+        'singleton',
+      )
+      .registerClass(
+        DI_TOKENS.BRAND.RESOLVE_BRAND_BY_HANDLE_HANDLER,
+        ResolveBrandByHandleHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.BRAND.BRANCH_STATUS_CACHE,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.BRAND.RESOLVE_BRANCH_BY_SLUG_HANDLER,
+        ResolveBranchBySlugHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.BRAND.BRANCH_STATUS_CACHE,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.BRAND.REGISTER_BRAND_HANDLER,
+        RegisterBrandHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.BRAND.CREATE_BRAND_BRANCH_HANDLER,
+        CreateBrandBranchHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      // FILE: apps/backend/src/container.ts (brandModule — Part 3 of 3)
+      .registerClass(
+        DI_TOKENS.BRAND.UPDATE_BRANCH_STATUS_HANDLER,
+        UpdateBranchOperationalStatusHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.BRAND.BRANCH_STATUS_CACHE,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.BRAND.UPDATE_BRANCH_SETTINGS_HANDLER,
+        UpdateBranchSettingsHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.BRAND.REVIEW_TAKEAWAY_WHITELIST_HANDLER,
+        ReviewTakeawayWhitelistHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.BRAND.CREATE_RESTAURANT_BY_ADMIN_HANDLER,
+        CreateRestaurantByAdminHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.BRAND.UPDATE_RESTAURANT_STATUS_BY_ADMIN_HANDLER,
+        UpdateRestaurantStatusByAdminHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      ),
+  commands: (c, commandBus) => {
+    commandBus.register('RegisterBrand', c.get(DI_TOKENS.BRAND.REGISTER_BRAND_HANDLER));
+    commandBus.register('CreateBrandBranch', c.get(DI_TOKENS.BRAND.CREATE_BRAND_BRANCH_HANDLER), {
+      requiredPermission: 'brand:branches:create',
+    });
+    commandBus.register(
+      'UpdateBranchOperationalStatus',
+      c.get(DI_TOKENS.BRAND.UPDATE_BRANCH_STATUS_HANDLER),
+      {
+        requiredPermission: 'branch:status:manage',
+      },
+    );
+    commandBus.register(
+      'UpdateBranchSettings',
+      c.get(DI_TOKENS.BRAND.UPDATE_BRANCH_SETTINGS_HANDLER),
+      {
+        requiredPermission: 'branch:settings:manage',
+      },
+    );
+    commandBus.register(
+      'ReviewTakeawayWhitelist',
+      c.get(DI_TOKENS.BRAND.REVIEW_TAKEAWAY_WHITELIST_HANDLER),
+      {
+        requiredPermission: 'branch:whitelist:manage',
+      },
+    );
+    commandBus.register(
+      'CreateRestaurantByAdmin',
+      c.get(DI_TOKENS.BRAND.CREATE_RESTAURANT_BY_ADMIN_HANDLER),
+      {
+        requiredPermission: 'platform:restaurants:manage',
+      },
+    );
+    commandBus.register(
+      'UpdateRestaurantStatusByAdmin',
+      c.get(DI_TOKENS.BRAND.UPDATE_RESTAURANT_STATUS_BY_ADMIN_HANDLER),
+      {
+        requiredPermission: 'platform:restaurants:manage',
+      },
+    );
+  },
+  queries: (c, queryBus) => {
+    queryBus.register('ListBrands', c.get(DI_TOKENS.BRAND.LIST_BRANDS_HANDLER));
+    queryBus.register(
+      'ResolveBrandByHandle',
+      c.get(DI_TOKENS.BRAND.RESOLVE_BRAND_BY_HANDLE_HANDLER),
+    );
+    queryBus.register('ResolveBranchBySlug', c.get(DI_TOKENS.BRAND.RESOLVE_BRANCH_BY_SLUG_HANDLER));
+  },
+  subscribers: (scope, bus) => {
+    scope.get(DI_TOKENS.BRAND.ONBOARDING_SAGA).register(bus);
+  },
+});
+
 // Declaring iAm bounded context:
 // Handles POS staff shift authentication, global Better Auth actor resolution, and
 // dynamic tenant PBAC role/permission management. Handlers that read `DI_TOKENS.CORE.REQUEST`
@@ -372,6 +621,7 @@ type IamProvides = {
     Spec<AssignStaffBranchAccessHandler, 'scoped'>,
     'request'
   >;
+  brandIamOnboardingHandler: Spec<BrandIamOnboardingHandler, 'singleton'>;
 };
 
 const iamModule = defineBoundedContext<IamProvides>({
@@ -485,6 +735,15 @@ const iamModule = defineBoundedContext<IamProvides>({
           DI_TOKENS.CORE.REQUEST,
         ],
         'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.IAM.BRAND_ONBOARDING_HANDLER,
+        BrandIamOnboardingHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+        ],
+        'singleton',
       ),
   commands: (c, commandBus) => {
     commandBus.register('LoginPosStaff', c.get(DI_TOKENS.IAM.LOGIN_POS_STAFF_HANDLER));
@@ -522,6 +781,176 @@ const iamModule = defineBoundedContext<IamProvides>({
         requiredPermission: 'staff:roles:manage',
       },
     );
+  },
+  subscribers: (scope, bus) => {
+    scope.get(DI_TOKENS.IAM.BRAND_ONBOARDING_HANDLER).register(bus);
+  },
+});
+
+// FILE: apps/backend/src/container.ts (catalogModule — Part 1 of 2)
+// Declaring Catalog bounded context:
+// Manages menu categories, items, modifiers, pricing policies, branch menu overrides,
+// and compiled JSONB + Redis menu snapshots via `BranchCatalogSyncSaga`.
+
+type CatalogProvides = {
+  catalogRepo: Spec<CatalogRepository, 'singleton'>;
+  brandCatalogOnboardingHandler: Spec<BrandCatalogOnboardingHandler, 'singleton'>;
+  branchCatalogSyncSaga: Spec<BranchCatalogSyncSaga, 'singleton'>;
+  getMenuSnapshotHandler: Spec<GetBranchMenuSnapshotHandler, 'singleton'>;
+  upsertPricingPolicyHandler: WithRequirements<
+    Spec<UpsertPricingPolicyHandler, 'scoped'>,
+    'request'
+  >;
+  upsertBranchMenuOverrideHandler: WithRequirements<
+    Spec<UpsertBranchMenuOverrideHandler, 'scoped'>,
+    'request'
+  >;
+  reviewPriceOverrideHandler: WithRequirements<
+    Spec<ReviewPriceOverrideHandler, 'scoped'>,
+    'request'
+  >;
+  createMenuItemHandler: WithRequirements<Spec<CreateMenuItemHandler, 'scoped'>, 'request'>;
+  updateItemPriceHandler: WithRequirements<Spec<UpdateMenuItemPriceHandler, 'scoped'>, 'request'>;
+};
+
+const catalogModule = defineBoundedContext<CatalogProvides>({
+  name: 'Catalog',
+  commandDeps: [
+    DI_TOKENS.CATALOG.UPSERT_PRICING_POLICY_HANDLER,
+    DI_TOKENS.CATALOG.UPSERT_BRANCH_MENU_OVERRIDE_HANDLER,
+    DI_TOKENS.CATALOG.REVIEW_PRICE_OVERRIDE_HANDLER,
+    DI_TOKENS.CATALOG.CREATE_MENU_ITEM_HANDLER,
+    DI_TOKENS.CATALOG.UPDATE_ITEM_PRICE_HANDLER,
+  ],
+  queryDeps: [
+    DI_TOKENS.CATALOG.GET_MENU_SNAPSHOT_HANDLER,
+  ],
+  module: (container) =>
+    container
+      .registerClass(
+        DI_TOKENS.CATALOG.REPO,
+        CatalogRepository,
+        [
+          DI_TOKENS.CORE.DB,
+        ],
+        'singleton',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.BRAND_ONBOARDING_HANDLER,
+        BrandCatalogOnboardingHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+        ],
+        'singleton',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.BRANCH_SYNC_SAGA,
+        BranchCatalogSyncSaga,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CATALOG.REPO,
+          DI_TOKENS.CORE.REDIS,
+          DI_TOKENS.CORE.SAGA_REPO,
+        ],
+        'singleton',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.GET_MENU_SNAPSHOT_HANDLER,
+        GetBranchMenuSnapshotHandler,
+        [
+          DI_TOKENS.CATALOG.REPO,
+          DI_TOKENS.CORE.REDIS,
+        ],
+        'singleton',
+      )
+      // FILE: apps/backend/src/container.ts (catalogModule — Part 2 of 2)
+      .registerClass(
+        DI_TOKENS.CATALOG.UPSERT_PRICING_POLICY_HANDLER,
+        UpsertPricingPolicyHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.UPSERT_BRANCH_MENU_OVERRIDE_HANDLER,
+        UpsertBranchMenuOverrideHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.REVIEW_PRICE_OVERRIDE_HANDLER,
+        ReviewPriceOverrideHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.CREATE_MENU_ITEM_HANDLER,
+        CreateMenuItemHandler,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.CATALOG.UPDATE_ITEM_PRICE_HANDLER,
+        UpdateMenuItemPriceHandler,
+        [
+          DI_TOKENS.CATALOG.REPO,
+          DI_TOKENS.CORE.EVENT_BUS,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      ),
+  commands: (c, commandBus) => {
+    commandBus.register(
+      'UpsertPricingPolicy',
+      c.get(DI_TOKENS.CATALOG.UPSERT_PRICING_POLICY_HANDLER),
+      {
+        requiredPermission: 'pricing:policy:manage',
+      },
+    );
+    commandBus.register(
+      'UpsertBranchMenuOverride',
+      c.get(DI_TOKENS.CATALOG.UPSERT_BRANCH_MENU_OVERRIDE_HANDLER),
+    );
+    commandBus.register(
+      'ReviewPriceOverride',
+      c.get(DI_TOKENS.CATALOG.REVIEW_PRICE_OVERRIDE_HANDLER),
+      {
+        requiredPermission: 'catalog:price:approve',
+      },
+    );
+    commandBus.register('CreateMenuItem', c.get(DI_TOKENS.CATALOG.CREATE_MENU_ITEM_HANDLER), {
+      requiredPermission: 'catalog:items:manage',
+    });
+    commandBus.register('UpdateMenuItemPrice', c.get(DI_TOKENS.CATALOG.UPDATE_ITEM_PRICE_HANDLER), {
+      requiredPermission: 'catalog:price:update',
+    });
+  },
+  queries: (c, queryBus) => {
+    queryBus.register('GetBranchMenuSnapshot', c.get(DI_TOKENS.CATALOG.GET_MENU_SNAPSHOT_HANDLER));
+  },
+  subscribers: (scope, bus) => {
+    scope.get(DI_TOKENS.CATALOG.BRAND_ONBOARDING_HANDLER).register(bus);
+    scope.get(DI_TOKENS.CATALOG.BRANCH_SYNC_SAGA).register(bus);
   },
 });
 
@@ -619,355 +1048,6 @@ const supportModule = defineBoundedContext<SupportProvides>({
     queryBus.register('ListBrandSupportTickets', c.get(DI_TOKENS.SUPPORT.LIST_TICKETS_HANDLER), {
       requiredPermission: 'brand:support:authorize',
     });
-  },
-});
-
-// Declaring Catalog bounded context:
-// Manages public storefront restaurant discovery, admin tenant provisioning, and
-// pre-compiled JSONB + Redis menu snapshots. Subscribes to `BranchMenuUpdated`
-// events to rebuild and invalidate stale menu caches asynchronously.
-
-type CatalogProvides = {
-  catalogRepo: Spec<CatalogRepository, 'singleton'>;
-  branchStatusCache: Spec<BranchStatusCache, 'singleton'>;
-  listBrandsHandler: Spec<ListBrandsHandler, 'singleton'>;
-  resolveBrandByHandleHandler: WithRequirements<
-    Spec<ResolveBrandByHandleHandler, 'scoped'>,
-    'request'
-  >;
-  resolveBranchBySlugHandler: WithRequirements<
-    Spec<ResolveBranchBySlugHandler, 'scoped'>,
-    'request'
-  >;
-  getMenuSnapshotHandler: Spec<GetBranchMenuSnapshotHandler, 'singleton'>;
-  menuCacheHandler: Spec<MenuCacheInvalidationHandler, 'singleton'>;
-  registerBrandHandler: WithRequirements<Spec<RegisterBrandHandler, 'scoped'>, 'request'>;
-  createBrandBranchHandler: WithRequirements<Spec<CreateBrandBranchHandler, 'scoped'>, 'request'>;
-  updateBranchStatusHandler: WithRequirements<
-    Spec<UpdateBranchOperationalStatusHandler, 'scoped'>,
-    'request'
-  >;
-  updateBranchSettingsHandler: WithRequirements<
-    Spec<UpdateBranchSettingsHandler, 'scoped'>,
-    'request'
-  >;
-  reviewTakeawayWhitelistHandler: WithRequirements<
-    Spec<ReviewTakeawayWhitelistHandler, 'scoped'>,
-    'request'
-  >;
-  upsertPricingPolicyHandler: WithRequirements<
-    Spec<UpsertPricingPolicyHandler, 'scoped'>,
-    'request'
-  >;
-  upsertBranchMenuOverrideHandler: WithRequirements<
-    Spec<UpsertBranchMenuOverrideHandler, 'scoped'>,
-    'request'
-  >;
-  reviewPriceOverrideHandler: WithRequirements<
-    Spec<ReviewPriceOverrideHandler, 'scoped'>,
-    'request'
-  >;
-  createMenuItemHandler: WithRequirements<Spec<CreateMenuItemHandler, 'scoped'>, 'request'>;
-  createRestaurantByAdminHandler: WithRequirements<
-    Spec<CreateRestaurantByAdminHandler, 'scoped'>,
-    'request'
-  >;
-  updateRestaurantStatusByAdminHandler: WithRequirements<
-    Spec<UpdateRestaurantStatusByAdminHandler, 'scoped'>,
-    'request'
-  >;
-  updateItemPriceHandler: WithRequirements<Spec<UpdateMenuItemPriceHandler, 'scoped'>, 'request'>;
-};
-
-const catalogModule = defineBoundedContext<CatalogProvides>({
-  name: 'Catalog',
-  commandDeps: [
-    DI_TOKENS.CATALOG.REGISTER_BRAND_HANDLER,
-    DI_TOKENS.CATALOG.CREATE_BRAND_BRANCH_HANDLER,
-    DI_TOKENS.CATALOG.UPDATE_BRANCH_STATUS_HANDLER,
-    DI_TOKENS.CATALOG.UPDATE_BRANCH_SETTINGS_HANDLER,
-    DI_TOKENS.CATALOG.REVIEW_TAKEAWAY_WHITELIST_HANDLER,
-    DI_TOKENS.CATALOG.UPSERT_PRICING_POLICY_HANDLER,
-    DI_TOKENS.CATALOG.UPSERT_BRANCH_MENU_OVERRIDE_HANDLER,
-    DI_TOKENS.CATALOG.REVIEW_PRICE_OVERRIDE_HANDLER,
-    DI_TOKENS.CATALOG.CREATE_MENU_ITEM_HANDLER,
-    DI_TOKENS.CATALOG.CREATE_RESTAURANT_BY_ADMIN_HANDLER,
-    DI_TOKENS.CATALOG.UPDATE_RESTAURANT_STATUS_BY_ADMIN_HANDLER,
-    DI_TOKENS.CATALOG.UPDATE_ITEM_PRICE_HANDLER,
-  ],
-  queryDeps: [
-    DI_TOKENS.CATALOG.LIST_BRANDS_HANDLER,
-    DI_TOKENS.CATALOG.RESOLVE_BRAND_BY_HANDLE_HANDLER,
-    DI_TOKENS.CATALOG.RESOLVE_BRANCH_BY_SLUG_HANDLER,
-    DI_TOKENS.CATALOG.GET_MENU_SNAPSHOT_HANDLER,
-  ],
-  module: (container) =>
-    container
-      .registerClass(
-        DI_TOKENS.CATALOG.REPO,
-        CatalogRepository,
-        [
-          DI_TOKENS.CORE.DB,
-        ],
-        'singleton',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.BRANCH_STATUS_CACHE,
-        BranchStatusCache,
-        [
-          DI_TOKENS.CORE.REDIS,
-        ],
-        'singleton',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.LIST_BRANDS_HANDLER,
-        ListBrandsHandler,
-        [
-          DI_TOKENS.CORE.DB,
-        ],
-        'singleton',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.RESOLVE_BRAND_BY_HANDLE_HANDLER,
-        ResolveBrandByHandleHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CATALOG.BRANCH_STATUS_CACHE,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.RESOLVE_BRANCH_BY_SLUG_HANDLER,
-        ResolveBranchBySlugHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CATALOG.BRANCH_STATUS_CACHE,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.GET_MENU_SNAPSHOT_HANDLER,
-        GetBranchMenuSnapshotHandler,
-        [
-          DI_TOKENS.CATALOG.REPO,
-          DI_TOKENS.CORE.REDIS,
-        ],
-        'singleton',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.MENU_CACHE_HANDLER,
-        MenuCacheInvalidationHandler,
-        [
-          DI_TOKENS.CATALOG.REPO,
-          DI_TOKENS.CORE.REDIS,
-        ],
-        'singleton',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.REGISTER_BRAND_HANDLER,
-        RegisterBrandHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.CREATE_BRAND_BRANCH_HANDLER,
-        CreateBrandBranchHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.AUTHZ,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.UPDATE_BRANCH_STATUS_HANDLER,
-        UpdateBranchOperationalStatusHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CATALOG.BRANCH_STATUS_CACHE,
-          DI_TOKENS.CORE.AUTHZ,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.UPDATE_BRANCH_SETTINGS_HANDLER,
-        UpdateBranchSettingsHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.AUTHZ,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.REVIEW_TAKEAWAY_WHITELIST_HANDLER,
-        ReviewTakeawayWhitelistHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.AUTHZ,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.UPSERT_PRICING_POLICY_HANDLER,
-        UpsertPricingPolicyHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.AUTHZ,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.UPSERT_BRANCH_MENU_OVERRIDE_HANDLER,
-        UpsertBranchMenuOverrideHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.EVENT_BUS,
-          DI_TOKENS.CORE.AUTHZ,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.REVIEW_PRICE_OVERRIDE_HANDLER,
-        ReviewPriceOverrideHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.EVENT_BUS,
-          DI_TOKENS.CORE.AUTHZ,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.CREATE_MENU_ITEM_HANDLER,
-        CreateMenuItemHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.EVENT_BUS,
-          DI_TOKENS.CORE.AUTHZ,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.CREATE_RESTAURANT_BY_ADMIN_HANDLER,
-        CreateRestaurantByAdminHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.AUTHZ,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.UPDATE_RESTAURANT_STATUS_BY_ADMIN_HANDLER,
-        UpdateRestaurantStatusByAdminHandler,
-        [
-          DI_TOKENS.CORE.DB,
-          DI_TOKENS.CORE.AUTHZ,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.CATALOG.UPDATE_ITEM_PRICE_HANDLER,
-        UpdateMenuItemPriceHandler,
-        [
-          DI_TOKENS.CATALOG.REPO,
-          DI_TOKENS.CORE.EVENT_BUS,
-          DI_TOKENS.CORE.AUTHZ,
-          DI_TOKENS.CORE.REQUEST,
-        ],
-        'scoped',
-      ),
-  commands: (c, commandBus) => {
-    commandBus.register('RegisterBrand', c.get(DI_TOKENS.CATALOG.REGISTER_BRAND_HANDLER));
-    commandBus.register('CreateBrandBranch', c.get(DI_TOKENS.CATALOG.CREATE_BRAND_BRANCH_HANDLER), {
-      requiredPermission: 'brand:branches:create',
-    });
-    commandBus.register(
-      'UpdateBranchOperationalStatus',
-      c.get(DI_TOKENS.CATALOG.UPDATE_BRANCH_STATUS_HANDLER),
-      {
-        requiredPermission: 'branch:status:manage',
-      },
-    );
-    commandBus.register(
-      'UpdateBranchSettings',
-      c.get(DI_TOKENS.CATALOG.UPDATE_BRANCH_SETTINGS_HANDLER),
-      {
-        requiredPermission: 'branch:settings:manage',
-      },
-    );
-    commandBus.register(
-      'ReviewTakeawayWhitelist',
-      c.get(DI_TOKENS.CATALOG.REVIEW_TAKEAWAY_WHITELIST_HANDLER),
-      {
-        requiredPermission: 'branch:whitelist:manage',
-      },
-    );
-    commandBus.register(
-      'UpsertPricingPolicy',
-      c.get(DI_TOKENS.CATALOG.UPSERT_PRICING_POLICY_HANDLER),
-      {
-        requiredPermission: 'pricing:policy:manage',
-      },
-    );
-    commandBus.register(
-      'UpsertBranchMenuOverride',
-      c.get(DI_TOKENS.CATALOG.UPSERT_BRANCH_MENU_OVERRIDE_HANDLER),
-    );
-    commandBus.register(
-      'ReviewPriceOverride',
-      c.get(DI_TOKENS.CATALOG.REVIEW_PRICE_OVERRIDE_HANDLER),
-      {
-        requiredPermission: 'catalog:price:approve',
-      },
-    );
-    commandBus.register('CreateMenuItem', c.get(DI_TOKENS.CATALOG.CREATE_MENU_ITEM_HANDLER), {
-      requiredPermission: 'catalog:items:manage',
-    });
-    commandBus.register(
-      'CreateRestaurantByAdmin',
-      c.get(DI_TOKENS.CATALOG.CREATE_RESTAURANT_BY_ADMIN_HANDLER),
-      {
-        requiredPermission: 'platform:restaurants:manage',
-      },
-    );
-    commandBus.register(
-      'UpdateRestaurantStatusByAdmin',
-      c.get(DI_TOKENS.CATALOG.UPDATE_RESTAURANT_STATUS_BY_ADMIN_HANDLER),
-      {
-        requiredPermission: 'platform:restaurants:manage',
-      },
-    );
-    commandBus.register('UpdateMenuItemPrice', c.get(DI_TOKENS.CATALOG.UPDATE_ITEM_PRICE_HANDLER), {
-      requiredPermission: 'catalog:price:update',
-    });
-  },
-  queries: (c, queryBus) => {
-    queryBus.register('ListBrands', c.get(DI_TOKENS.CATALOG.LIST_BRANDS_HANDLER));
-    queryBus.register(
-      'ResolveBrandByHandle',
-      c.get(DI_TOKENS.CATALOG.RESOLVE_BRAND_BY_HANDLE_HANDLER),
-    );
-    queryBus.register(
-      'ResolveBranchBySlug',
-      c.get(DI_TOKENS.CATALOG.RESOLVE_BRANCH_BY_SLUG_HANDLER),
-    );
-    queryBus.register('GetBranchMenuSnapshot', c.get(DI_TOKENS.CATALOG.GET_MENU_SNAPSHOT_HANDLER));
-  },
-  subscribers: (scope, bus) => {
-    scope.get(DI_TOKENS.CATALOG.MENU_CACHE_HANDLER).register(bus);
   },
 });
 
@@ -1415,6 +1495,7 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
 // ============================================================================
 
 const BOUNDED_CONTEXTS = [
+  brandModule,
   iamModule,
   supportModule,
   catalogModule,
@@ -1428,6 +1509,7 @@ const BOUNDED_CONTEXTS = [
 const domainContainer = coreContainer
   .use(iamModule.module)
   .use(supportModule.module)
+  .use(brandModule.module)
   .use(catalogModule.module)
   .use(loyaltyModule.module)
   .use(billingModule.module)
@@ -1473,6 +1555,16 @@ export const rootContainer = domainContainer
   // HTTP controllers are 'scoped' per request so they receive request-bound buses and context.
   // Edge case: `CatalogController` omits `DI_TOKENS.CORE.REQUEST` because storefront menu
   // reads are public and tenant-specific mutations extract `restaurantId` via handlers.
+  .registerClass(
+    DI_TOKENS.BRAND.CONTROLLER,
+    BrandController,
+    [
+      DI_TOKENS.CORE.COMMAND_BUS,
+      DI_TOKENS.CORE.QUERY_BUS,
+      DI_TOKENS.CORE.REQUEST,
+    ],
+    'scoped',
+  )
   .registerClass(
     DI_TOKENS.IAM.CONTROLLER,
     IamController,
@@ -1538,6 +1630,7 @@ export const rootContainer = domainContainer
     'scoped',
   );
 
+// FILE: apps/backend/src/container.ts (ScopeServices)
 export interface ScopeServices {
   request: RequestContext;
   log: AppLogger;
@@ -1556,9 +1649,13 @@ export interface ScopeServices {
   supportTicketRepository: SupportTicketRepository;
   supportAccessPort: SupportAccessPort;
   supportController: SupportController;
-  catalogRepo: CatalogRepository;
+  brandIamOnboardingHandler: BrandIamOnboardingHandler;
   branchStatusCache: BranchStatusCache;
-  menuCacheHandler: MenuCacheInvalidationHandler;
+  brandOnboardingSaga: BrandOnboardingSaga;
+  brandController: BrandController;
+  catalogRepo: CatalogRepository;
+  brandCatalogOnboardingHandler: BrandCatalogOnboardingHandler;
+  branchCatalogSyncSaga: BranchCatalogSyncSaga;
   catalogController: CatalogController;
   loyaltyRepo: LoyaltyRepository;
   loyaltySettlementService: LoyaltySettlementService;

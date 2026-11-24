@@ -1,4 +1,4 @@
-# Unified IAM Policy Engine, Brand-Authorized JIT Support Tickets & HTTP Route Guards
+# ADR-012: Unified IAM Policy Engine, Brand-Authorized JIT Support Tickets & HTTP Route Guards
 
 - **Status:** Implemented & Verified
 - **Target Package:** `apps/backend` (`@foodapp/backend`), `packages/db` (`@foodapp/db`)

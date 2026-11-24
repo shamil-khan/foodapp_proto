@@ -1,3 +1,4 @@
+// FILE: apps/backend/src/brand/application/brand-commands.ts (Part 1 of 5)
 import * as crypto from 'node:crypto';
 import {
   type HomePickupPrivacyMode,
@@ -7,24 +8,24 @@ import {
   PaymentConfigTable,
   type Pool,
   type PoolClient,
-  PricingPolicyTable,
   RestaurantBranchTable,
   RestaurantLayoutTable,
-  RestaurantStaffTable,
   RestaurantTable,
-  StaffBranchAssignmentTable,
-  StaffRolePermissionTable,
-  StaffRoleTable,
-  SYSTEM_ROLE_DEFINITIONS,
   sqlInsert,
   sqlSelect,
   sqlUpdate,
 } from '@foodapp/db';
-import type { DropPointConfig, TakeawayWhitelistEntry } from '@/catalog/domain/location-privacy';
-import { resolveTenantBootstrapPlan } from '@/catalog/domain/tenant-bootstrap-strategy';
-import type { BranchStatusCache } from '@/catalog/infrastructure/branch-status-cache';
+import type {
+  BranchCreatedPayload,
+  BranchSettingsUpdatedPayload,
+  BrandRegisteredPayload,
+} from '@/brand/domain/brand-events';
+import type { DropPointConfig, TakeawayWhitelistEntry } from '@/brand/domain/location-privacy';
+import { resolveTenantBootstrapPlan } from '@/brand/domain/tenant-bootstrap-strategy';
+import type { BranchStatusCache } from '@/brand/infrastructure/branch-status-cache';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
+import type { EventBus } from '@/core/application/event-bus';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
 
 export function hashStaffPassword(plainPassword: string): string {
@@ -42,8 +43,6 @@ export function slugifyKey(raw: string): string {
 }
 
 export const RESERVED_BRAND_HANDLES = new Set([
-  'branches',
-  'pos',
   'register',
   'admin',
   'auth',
@@ -86,7 +85,7 @@ export interface RegisterBrandCommand
   readonly ownerEmail: string;
   readonly ownerPassword: string;
 }
-
+// FILE: apps/backend/src/brand/application/brand-commands.ts (Part 2 of 5)
 export class RegisterBrandHandler
   implements
     CommandHandler<
@@ -102,53 +101,13 @@ export class RegisterBrandHandler
     >
 {
   private readonly pool: Pool;
+  private readonly eventBus: EventBus;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, request: RequestContext) {
+  constructor(pool: Pool, eventBus: EventBus, request: RequestContext) {
     this.pool = pool;
+    this.eventBus = eventBus;
     this.request = request;
-  }
-
-  private async seedRoles(
-    client: PoolClient,
-    restaurantId: string,
-    plan: ReturnType<typeof resolveTenantBootstrapPlan>,
-  ): Promise<string> {
-    let ownerRoleId = '';
-    const srCols = StaffRoleTable.cols;
-    for (const roleName of plan.rolesToSeed) {
-      const def = SYSTEM_ROLE_DEFINITIONS[roleName];
-      const roleIns = sqlInsert(StaffRoleTable)
-        .values({
-          restaurantId,
-          name: roleName,
-          description: def.description,
-          isSystemRole: true,
-          createdBy: this.request.actorId,
-          updatedBy: this.request.actorId,
-        })
-        .returning([
-          srCols.id,
-        ])
-        .compile();
-      const roleRes = await client.query<typeof roleIns._result>(roleIns.text, roleIns.params);
-      const createdRoleId = roleRes.rows[0]?.id;
-      if (!createdRoleId) throw new Error(`Failed to seed role ${roleName}`);
-      if (roleName === plan.ownerRoleName) ownerRoleId = createdRoleId;
-
-      for (const perm of def.permissions) {
-        const permIns = sqlInsert(StaffRolePermissionTable)
-          .values({
-            staffRoleId: createdRoleId,
-            permission: perm,
-            createdBy: this.request.actorId,
-            updatedBy: this.request.actorId,
-          })
-          .compile();
-        await client.query(permIns.text, permIns.params);
-      }
-    }
-    return ownerRoleId;
   }
 
   private async insertBrandAndBranch(
@@ -220,8 +179,18 @@ export class RegisterBrandHandler
       branchId,
     };
   }
-
-  async execute(cmd: RegisterBrandCommand) {
+  // FILE: apps/backend/src/brand/application/brand-commands.ts (Part 3 of 5)
+  // FILE: apps/backend/src/brand/application/brand-commands.ts (Line 183)
+  async execute(cmd: RegisterBrandCommand): Promise<
+    Result<{
+      restaurantId: string;
+      brandHandle: string;
+      branchId: string;
+      branchKey: string;
+      cityKey: string;
+      ownerStaffId: string;
+    }>
+  > {
     const cleanHandle = slugifyKey(cmd.handle);
     if (RESERVED_BRAND_HANDLES.has(cleanHandle)) {
       return err(
@@ -257,10 +226,12 @@ export class RegisterBrandHandler
       isMultiBranchEnterprise: cmd.isMultiBranchEnterprise,
     });
     const client = await this.pool.connect();
+    let restaurantId = '';
+    let branchId = '';
 
     try {
       await client.query('BEGIN');
-      const { restaurantId, branchId } = await this.insertBrandAndBranch(
+      const created = await this.insertBrandAndBranch(
         client,
         cmd,
         cleanHandle,
@@ -268,6 +239,8 @@ export class RegisterBrandHandler
         branchKey,
         plan,
       );
+      restaurantId = created.restaurantId;
+      branchId = created.branchId;
 
       const layoutQ = sqlInsert(RestaurantLayoutTable)
         .values({
@@ -291,71 +264,57 @@ export class RegisterBrandHandler
         .compile();
       await client.query(payQ.text, payQ.params);
 
-      const policyQ = sqlInsert(PricingPolicyTable)
-        .values({
-          restaurantId,
-          branchId: null,
-          menuPricingMode: cmd.isMultiBranchEnterprise ? 'THRESHOLD_HYBRID' : 'BRANCH_DIRECT',
-          maxDirectPriceDeltaPercent: cmd.isMultiBranchEnterprise ? '10.00' : '25.00',
-          allowBranchLocalItems: true,
-          createdBy: this.request.actorId,
-          updatedBy: this.request.actorId,
-        })
-        .compile();
-      await client.query(policyQ.text, policyQ.params);
-
-      const ownerRoleId = await this.seedRoles(client, restaurantId, plan);
-      const sCols = RestaurantStaffTable.cols;
-      const staffIns = sqlInsert(RestaurantStaffTable)
-        .values({
-          restaurantId,
-          email: cmd.ownerEmail.trim().toLowerCase(),
-          passwordHash: hashStaffPassword(cmd.ownerPassword),
-          name: cmd.ownerName.trim(),
-          role: 'OWNER',
-          roleId: ownerRoleId,
-          createdBy: this.request.actorId,
-          updatedBy: this.request.actorId,
-        })
-        .returning([
-          sCols.id,
-        ])
-        .compile();
-      const ownerStaffId = (
-        await client.query<typeof staffIns._result>(staffIns.text, staffIns.params)
-      ).rows[0]?.id;
-      if (!ownerStaffId) throw new Error('Failed to insert owner staff');
-
-      const assignIns = sqlInsert(StaffBranchAssignmentTable)
-        .values({
-          staffId: ownerStaffId,
-          branchId,
-          staffRoleId: ownerRoleId,
-          isPrimary: true,
-          createdBy: this.request.actorId,
-          updatedBy: this.request.actorId,
-        })
-        .compile();
-      await client.query(assignIns.text, assignIns.params);
-
       await client.query('COMMIT');
-      return ok({
-        restaurantId,
-        brandHandle: cleanHandle,
-        branchId,
-        branchKey,
-        cityKey,
-        ownerStaffId,
-      });
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
     } finally {
       client.release();
     }
+
+    const ownerStaffId = crypto.randomUUID();
+    // BrandOnboardingSaga coordinates IAM owner/role bootstrap and Catalog policy bootstrap atomically
+    await this.eventBus.publish([
+      {
+        eventId: crypto.randomUUID(),
+        aggregateId: restaurantId,
+        aggregateType: 'BrandAggregate',
+        eventType: 'BrandRegistered',
+        version: 1,
+        occurredAt: new Date(),
+        payload: {
+          restaurantId,
+          brandName: cmd.brandName.trim(),
+          brandHandle: cleanHandle,
+          branchId,
+          branchName: cmd.branchName.trim(),
+          postcodeSector: cmd.postcodeSector.trim().toUpperCase(),
+          kitchenType: cmd.kitchenType,
+          isMultiBranchEnterprise: Boolean(cmd.isMultiBranchEnterprise),
+          ownerStaffId,
+          ownerName: cmd.ownerName.trim(),
+          ownerEmail: cmd.ownerEmail.trim().toLowerCase(),
+          ownerPasswordHash: hashStaffPassword(cmd.ownerPassword),
+        } satisfies BrandRegisteredPayload,
+        metadata: {
+          requestId: this.request.requestId,
+          actorId: this.request.actorId,
+          restaurantId,
+        },
+      },
+    ]);
+
+    return ok({
+      restaurantId,
+      brandHandle: cleanHandle,
+      branchId,
+      branchKey,
+      cityKey,
+      ownerStaffId,
+    });
   }
 }
-
+// FILE: apps/backend/src/brand/application/brand-commands.ts (Part 4 of 5)
 export interface CreateBrandBranchCommand
   extends Command<
     Result<{
@@ -395,11 +354,13 @@ export class CreateBrandBranchHandler
     >
 {
   private readonly pool: Pool;
+  private readonly eventBus: EventBus;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
+  constructor(pool: Pool, eventBus: EventBus, authz: AuthorizationPolicy, request: RequestContext) {
     this.pool = pool;
+    this.eventBus = eventBus;
     this.authz = authz;
     this.request = request;
   }
@@ -413,6 +374,18 @@ export class CreateBrandBranchHandler
   > {
     const access = this.authz.assertRestaurantAccess(cmd.restaurantId, 'brand:branches:create');
     if (!access.ok) return access;
+
+    const rCols = RestaurantTable.cols;
+    const brandQ = sqlSelect(RestaurantTable)
+      .select([
+        rCols.name,
+      ])
+      .whereEq(rCols.id, cmd.restaurantId)
+      .activeOnly()
+      .compile();
+    const brandName =
+      (await this.pool.query<typeof brandQ._result>(brandQ.text, brandQ.params)).rows[0]?.name ??
+      cmd.name.trim();
 
     const cityKey = slugifyKey(cmd.city);
     const branchKey = slugifyKey(cmd.branchKey ?? cmd.name);
@@ -441,6 +414,8 @@ export class CreateBrandBranchHandler
       );
     }
 
+    const menuSelectionMode = cmd.menuSelectionMode ?? 'ALL_BRAND_ITEMS';
+    const postcodeSector = cmd.postcodeSector.trim().toUpperCase();
     const ins = sqlInsert(RestaurantBranchTable)
       .values({
         restaurantId: cmd.restaurantId,
@@ -449,7 +424,7 @@ export class CreateBrandBranchHandler
         city: cmd.city.trim(),
         cityKey,
         kitchenType: cmd.kitchenType,
-        postcodeSector: cmd.postcodeSector.trim().toUpperCase(),
+        postcodeSector,
         streetAddress: cmd.streetAddress.trim(),
         areaLocality: cmd.areaLocality?.trim() ?? null,
         latitude: cmd.latitude !== undefined ? cmd.latitude.toFixed(6) : null,
@@ -461,7 +436,7 @@ export class CreateBrandBranchHandler
         supportsTakeaway: cmd.supportsTakeaway ?? plan.fulfillmentDefaults.supportsTakeaway,
         supportsPlatformDelivery:
           cmd.supportsPlatformDelivery ?? plan.fulfillmentDefaults.supportsPlatformDelivery,
-        menuSelectionMode: cmd.menuSelectionMode ?? 'ALL_BRAND_ITEMS',
+        menuSelectionMode,
         createdBy: this.request.actorId,
         updatedBy: this.request.actorId,
       })
@@ -473,19 +448,30 @@ export class CreateBrandBranchHandler
     const branchId = res.rows[0]?.id;
     if (!branchId) throw new Error('Failed to create branch');
 
-    if (this.request.actorSource === 'POS_STAFF' && this.request.roleId) {
-      const assign = sqlInsert(StaffBranchAssignmentTable)
-        .values({
-          staffId: this.request.actorId,
+    // Sync branch metadata into catalog's read-model projection via domain event
+    await this.eventBus.publish([
+      {
+        eventId: crypto.randomUUID(),
+        aggregateId: branchId,
+        aggregateType: 'BranchAggregate',
+        eventType: 'BranchCreated',
+        version: 1,
+        occurredAt: new Date(),
+        payload: {
+          restaurantId: cmd.restaurantId,
+          brandName,
           branchId,
-          staffRoleId: this.request.roleId,
-          isPrimary: false,
-          createdBy: this.request.actorId,
-          updatedBy: this.request.actorId,
-        })
-        .compile();
-      await this.pool.query(assign.text, assign.params);
-    }
+          branchName: cmd.name.trim(),
+          postcodeSector,
+          menuSelectionMode,
+        } satisfies BranchCreatedPayload,
+        metadata: {
+          requestId: this.request.requestId,
+          actorId: this.request.actorId,
+          restaurantId: cmd.restaurantId,
+        },
+      },
+    ]);
 
     return ok({
       branchId,
@@ -494,7 +480,7 @@ export class CreateBrandBranchHandler
     });
   }
 }
-
+// FILE: apps/backend/src/brand/application/brand-commands.ts (Part 5 of 5)
 export interface UpdateBranchOperationalStatusCommand
   extends Command<
     Result<{
@@ -540,7 +526,6 @@ export class UpdateBranchOperationalStatusHandler
       statusLockedUntil: string | null;
     }>
   > {
-    // FILE: apps/backend/src/catalog/application/branch-commands.ts (UpdateBranchOperationalStatusHandler.execute)
     const access = this.authz.assertBranchAccess(
       cmd.branchId,
       'branch:status:manage',
@@ -627,11 +612,13 @@ export class UpdateBranchSettingsHandler
   implements CommandHandler<UpdateBranchSettingsCommand, Result<void>>
 {
   private readonly pool: Pool;
+  private readonly eventBus: EventBus;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
+  constructor(pool: Pool, eventBus: EventBus, authz: AuthorizationPolicy, request: RequestContext) {
     this.pool = pool;
+    this.eventBus = eventBus;
     this.authz = authz;
     this.request = request;
   }
@@ -641,6 +628,18 @@ export class UpdateBranchSettingsHandler
     if (!access.ok) return access;
 
     const bCols = RestaurantBranchTable.cols;
+    const sel = sqlSelect(RestaurantBranchTable)
+      .select([
+        bCols.restaurantId,
+      ])
+      .whereEq(bCols.id, cmd.branchId)
+      .activeOnly()
+      .compile();
+    const branch = (await this.pool.query<typeof sel._result>(sel.text, sel.params)).rows[0];
+    if (!branch) {
+      return err(new DomainError('BRANCH_NOT_FOUND', 'Branch not found.', 404));
+    }
+
     const upd = sqlUpdate(RestaurantBranchTable)
       .set({
         supportsDineIn: cmd.supportsDineIn,
@@ -662,9 +661,29 @@ export class UpdateBranchSettingsHandler
       .whereNull(bCols.deletedAt)
       .compile();
 
-    const res = await this.pool.query(upd.text, upd.params);
-    if ((res.rowCount ?? 0) === 0) {
-      return err(new DomainError('BRANCH_NOT_FOUND', 'Branch not found.', 404));
+    await this.pool.query(upd.text, upd.params);
+
+    if (cmd.menuSelectionMode !== undefined) {
+      await this.eventBus.publish([
+        {
+          eventId: crypto.randomUUID(),
+          aggregateId: cmd.branchId,
+          aggregateType: 'BranchAggregate',
+          eventType: 'BranchSettingsUpdated',
+          version: 1,
+          occurredAt: new Date(),
+          payload: {
+            restaurantId: branch.restaurantId,
+            branchId: cmd.branchId,
+            menuSelectionMode: cmd.menuSelectionMode,
+          } satisfies BranchSettingsUpdatedPayload,
+          metadata: {
+            requestId: this.request.requestId,
+            actorId: this.request.actorId,
+            restaurantId: branch.restaurantId,
+          },
+        },
+      ]);
     }
     return ok(undefined);
   }

@@ -1,5 +1,5 @@
 // AUTO-GENERATED FILE — DO NOT EDIT MANUALLY
-// Generated at: 2026-11-24T05:32:52.226Z
+// Generated at: 2026-11-24T12:12:27.395Z
 // Run `pnpm db:codegen` after applying new SQL migrations.
 
 export interface TableMeta<TCols extends Record<string, string>, TRow, TInsert = Partial<TRow>> {
@@ -202,6 +202,79 @@ export const BranchMenuOverrideTable: TableMeta<
     requestedByStaffId: '"requestedByStaffId"',
     reviewedByStaffId: '"reviewedByStaffId"',
     reviewNote: '"reviewNote"',
+    rowVersion: '"rowVersion"',
+    createdAt: '"createdAt"',
+    createdBy: '"createdBy"',
+    updatedAt: '"updatedAt"',
+    updatedBy: '"updatedBy"',
+    deletedAt: '"deletedAt"',
+    deletedBy: '"deletedBy"',
+  },
+} as const;
+
+export interface CatalogBranchProjectionRow {
+  id: string;
+  branchId: string;
+  restaurantId: string;
+  brandName: string;
+  branchName: string;
+  postcodeSector: string;
+  menuSelectionMode: string;
+  rowVersion: number;
+  createdAt: Date;
+  createdBy: string | null;
+  updatedAt: Date;
+  updatedBy: string | null;
+  deletedAt: Date | null;
+  deletedBy: string | null;
+}
+
+export interface CatalogBranchProjectionInsert {
+  id?: string;
+  branchId: string;
+  restaurantId: string;
+  brandName: string;
+  branchName: string;
+  postcodeSector?: string;
+  menuSelectionMode?: string;
+  rowVersion?: number;
+  createdAt?: Date;
+  createdBy?: string | null;
+  updatedAt?: Date;
+  updatedBy?: string | null;
+  deletedAt?: Date | null;
+  deletedBy?: string | null;
+}
+
+export const CatalogBranchProjectionTable: TableMeta<
+  {
+    id: '"id"';
+    branchId: '"branchId"';
+    restaurantId: '"restaurantId"';
+    brandName: '"brandName"';
+    branchName: '"branchName"';
+    postcodeSector: '"postcodeSector"';
+    menuSelectionMode: '"menuSelectionMode"';
+    rowVersion: '"rowVersion"';
+    createdAt: '"createdAt"';
+    createdBy: '"createdBy"';
+    updatedAt: '"updatedAt"';
+    updatedBy: '"updatedBy"';
+    deletedAt: '"deletedAt"';
+    deletedBy: '"deletedBy"';
+  },
+  CatalogBranchProjectionRow,
+  CatalogBranchProjectionInsert
+> = {
+  table: '"CatalogBranchProjection"',
+  cols: {
+    id: '"id"',
+    branchId: '"branchId"',
+    restaurantId: '"restaurantId"',
+    brandName: '"brandName"',
+    branchName: '"branchName"',
+    postcodeSector: '"postcodeSector"',
+    menuSelectionMode: '"menuSelectionMode"',
     rowVersion: '"rowVersion"',
     createdAt: '"createdAt"',
     createdBy: '"createdBy"',
