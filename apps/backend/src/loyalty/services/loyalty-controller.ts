@@ -46,10 +46,42 @@ export class LoyaltyController {
     }
   }
 
+  // FILE: apps/backend/src/loyalty/services/loyalty-controller.ts (updateGovernance)
   async updateGovernance(c: Context<AppEnv>, body: Record<string, unknown>) {
+    const authz = c.var.di.get('authz');
+    if (body.issuerScope === 'MERCHANT' && authz.isPlatformAdmin()) {
+      const ticketId = c.req.header('X-Support-Ticket-Id')?.trim();
+      if (!ticketId) {
+        return c.json(
+          {
+            code: 'SUPPORT_TICKET_REQUIRED',
+            error: 'Platform support intervention requires an approved X-Support-Ticket-Id header.',
+          },
+          403,
+        );
+      }
+      const grantRes = await c.var.di.get('supportAccessPort').validateAndAuditTicket({
+        ticketId,
+        platformUserId: this.request.actorId,
+        requiredScope: 'platform:support:loyalty-governance',
+        expectedRestaurantId: body.restaurantId as string | undefined,
+        httpMethod: c.req.method,
+        httpPath: c.req.path,
+      });
+      if (!grantRes.ok) return mapLoyaltyError(c, grantRes.error);
+      this.request.supportGrant = grantRes.value;
+    }
+
+    const restaurantId =
+      (body.restaurantId as string | undefined) ??
+      this.request.supportGrant?.restaurantId ??
+      this.request.restaurantId;
     const res = await this.commandBus.dispatch<Result<void, DomainError>>(
       'UpdateLoyaltyGovernance',
-      body,
+      {
+        ...body,
+        restaurantId,
+      },
     );
     if (!res.ok) return mapLoyaltyError(c, res.error);
     return c.json(

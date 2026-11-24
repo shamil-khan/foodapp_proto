@@ -197,9 +197,26 @@ export class OrderController {
   }
 
   async streamOrderEvents(c: Context<AppEnv>, orderId: string) {
+    try {
+      const detail = await this.queryBus.ask<OrderDetailDto | null>('GetOrderById', {
+        orderId,
+      });
+      if (!detail) {
+        return c.json(
+          {
+            code: 'ORDER_NOT_FOUND',
+            error: 'Order not found',
+          },
+          404,
+        );
+      }
+    } catch (error) {
+      if (error instanceof DomainError) return mapOrderError(c, error);
+      throw error;
+    }
+
     const rawLastId = c.req.header('Last-Event-ID') ?? c.req.query('afterVersion') ?? '0';
     const afterVersion = Math.max(0, Number.parseInt(rawLastId, 10) || 0);
-
     const missedEvents = await this.queryBus.ask<OrderStreamEventDto[]>('GetOrderEventsSince', {
       orderId,
       afterVersion,

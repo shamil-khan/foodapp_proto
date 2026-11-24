@@ -1,3 +1,4 @@
+// FILE: apps/backend/src/iam/domain/auth-actor.ts
 import type { Permission, PlatformRole, TenantRole } from '@foodapp/db';
 
 export type ActorSource = 'GLOBAL_USER' | 'POS_STAFF' | 'SYSTEM';

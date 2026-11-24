@@ -1,7 +1,10 @@
+// FILE: apps/backend/src/iam/application/role-commands.ts (Part 1 of 4)
 import {
+  type PermissionEffect,
   type Pool,
   RestaurantStaffTable,
   StaffBranchAssignmentTable,
+  StaffDirectPermissionTable,
   StaffRolePermissionTable,
   StaffRoleTable,
   sqlInsert,
@@ -15,7 +18,7 @@ import {
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
-import type { RolePermissionCache } from '@/identity/infrastructure/role-permission-cache';
+import type { RolePermissionCache } from '@/iam/infrastructure/role-permission-cache';
 
 const VALID_TENANT_PERMS = new Set<string>(TENANT_PERMISSIONS);
 
@@ -74,6 +77,7 @@ export class CreateStaffRoleHandler
       return err(new DomainError('INVALID_PERMISSIONS', 'At least one valid right is required.'));
     }
 
+    // Prevent privilege escalation: actors can only grant rights they personally hold
     const delegateCheck = this.authz.assertCanDelegate(cleanPerms);
     if (!delegateCheck.ok) return delegateCheck;
 
@@ -147,7 +151,7 @@ export class CreateStaffRoleHandler
     }
   }
 }
-
+// FILE: apps/backend/src/iam/application/role-commands.ts (Part 2 of 4)
 export interface UpdateStaffRoleCommand extends Command<Result<void>> {
   readonly roleId: string;
   readonly name?: string;
@@ -200,6 +204,7 @@ export class UpdateStaffRoleHandler
     const access = this.authz.assertRestaurantAccess(role.restaurantId, 'staff:roles:manage');
     if (!access.ok) return access;
 
+    // Predefined system roles are immutable across all tenants
     if (role.isSystemRole) {
       return err(
         new DomainError(
@@ -267,6 +272,7 @@ export class UpdateStaffRoleHandler
       }
 
       await client.query('COMMIT');
+      // Zero-fan-out invalidation: RolePermissionCache composes role + direct rules on read
       await this.rolePermissionCache.invalidateRole(role.id);
       return ok(undefined);
     } catch (error) {
@@ -277,7 +283,7 @@ export class UpdateStaffRoleHandler
     }
   }
 }
-
+// FILE: apps/backend/src/iam/application/role-commands.ts (Part 3 of 4)
 export interface DeleteStaffRoleCommand extends Command<Result<void>> {
   readonly roleId: string;
 }
@@ -363,14 +369,23 @@ export class DeleteStaffRoleHandler
   }
 }
 
+export interface DirectPermissionRuleInput {
+  readonly permission: TenantPermission;
+  readonly effect?: PermissionEffect;
+  readonly reason?: string;
+  readonly validFrom?: string;
+  readonly expiresAt?: string;
+}
+
 export interface AssignStaffBranchAccessCommand extends Command<Result<void>> {
   readonly staffId: string;
   readonly branchId: string;
   readonly roleId: string;
   readonly directPermissions?: readonly TenantPermission[];
+  readonly directRules?: readonly DirectPermissionRuleInput[];
   readonly isPrimary?: boolean;
 }
-
+// FILE: apps/backend/src/iam/application/role-commands.ts (Part 4 of 4)
 function mapRoleNameToLegacyEnum(roleName: string): TenantRole {
   if (roleName === 'OWNER' || roleName === 'BRAND_OWNER') return 'OWNER';
   if (roleName === 'OPERATIONAL_MANAGER') return 'ADMIN';
@@ -398,11 +413,93 @@ export class AssignStaffBranchAccessHandler
     this.request = request;
   }
 
+  private normalizeDirectRules(cmd: AssignStaffBranchAccessCommand): {
+    permission: TenantPermission;
+    effect: PermissionEffect;
+    reason: string | null;
+    validFrom: Date | null;
+    expiresAt: Date | null;
+  }[] {
+    const byPerm = new Map<
+      TenantPermission,
+      {
+        permission: TenantPermission;
+        effect: PermissionEffect;
+        reason: string | null;
+        validFrom: Date | null;
+        expiresAt: Date | null;
+      }
+    >();
+
+    for (const perm of sanitizePermissions(cmd.directPermissions ?? [])) {
+      byPerm.set(perm, {
+        permission: perm,
+        effect: 'ALLOW',
+        reason: null,
+        validFrom: null,
+        expiresAt: null,
+      });
+    }
+
+    for (const rule of cmd.directRules ?? []) {
+      if (!VALID_TENANT_PERMS.has(rule.permission)) continue;
+      byPerm.set(rule.permission, {
+        permission: rule.permission,
+        effect: rule.effect ?? 'ALLOW',
+        reason: rule.reason?.trim() ?? null,
+        validFrom: rule.validFrom ? new Date(rule.validFrom) : null,
+        expiresAt: rule.expiresAt ? new Date(rule.expiresAt) : null,
+      });
+    }
+
+    return Array.from(byPerm.values());
+  }
+
+  private async replaceStaffDirectRules(
+    staffId: string,
+    branchId: string,
+    rules: ReturnType<AssignStaffBranchAccessHandler['normalizeDirectRules']>,
+  ): Promise<void> {
+    const dCols = StaffDirectPermissionTable.cols;
+    const existingQ = sqlSelect(StaffDirectPermissionTable)
+      .select([
+        dCols.id,
+      ])
+      .whereEq(dCols.staffId, staffId)
+      .whereEq(dCols.branchId, branchId)
+      .activeOnly()
+      .compile();
+    const existingRows = (
+      await this.pool.query<typeof existingQ._result>(existingQ.text, existingQ.params)
+    ).rows;
+
+    for (const row of existingRows) {
+      const del = sqlSoftDelete(StaffDirectPermissionTable, row.id, this.request.actorId);
+      await this.pool.query(del.text, del.params);
+    }
+
+    for (const rule of rules) {
+      const ins = sqlInsert(StaffDirectPermissionTable)
+        .values({
+          staffId,
+          branchId,
+          permission: rule.permission,
+          effect: rule.effect,
+          reason: rule.reason,
+          validFrom: rule.validFrom,
+          expiresAt: rule.expiresAt,
+          createdBy: this.request.actorId,
+          updatedBy: this.request.actorId,
+        })
+        .compile();
+      await this.pool.query(ins.text, ins.params);
+    }
+  }
+
   private async upsertAssignment(params: {
     staffId: string;
     branchId: string;
     roleId: string;
-    directPermissions: TenantPermission[];
     isPrimary?: boolean;
   }): Promise<void> {
     const aCols = StaffBranchAssignmentTable.cols;
@@ -420,7 +517,6 @@ export class AssignStaffBranchAccessHandler
       const upd = sqlUpdate(StaffBranchAssignmentTable)
         .set({
           staffRoleId: params.roleId,
-          directPermissions: params.directPermissions,
           isPrimary: params.isPrimary,
         })
         .withAuditBump(this.request.actorId)
@@ -436,7 +532,6 @@ export class AssignStaffBranchAccessHandler
         staffId: params.staffId,
         branchId: params.branchId,
         staffRoleId: params.roleId,
-        directPermissions: params.directPermissions,
         isPrimary: params.isPrimary ?? false,
         createdBy: this.request.actorId,
         updatedBy: this.request.actorId,
@@ -480,10 +575,15 @@ export class AssignStaffBranchAccessHandler
     }
 
     const rolePerms = await this.rolePermissionCache.getPermissionsForRole(targetRole.id);
-    const cleanDirect = sanitizePermissions(cmd.directPermissions ?? []);
+    const normalizedRules = this.normalizeDirectRules(cmd);
+    const allowDirectPerms = normalizedRules
+      .filter((r) => r.effect === 'ALLOW')
+      .map((r) => r.permission);
+
+    // Ensure actor holds all rights being granted via role + direct ALLOW rules
     const delegateCheck = this.authz.assertCanDelegate([
       ...rolePerms,
-      ...cleanDirect,
+      ...allowDirectPerms,
     ]);
     if (!delegateCheck.ok) return delegateCheck;
 
@@ -491,9 +591,9 @@ export class AssignStaffBranchAccessHandler
       staffId: staff.id,
       branchId: cmd.branchId,
       roleId: targetRole.id,
-      directPermissions: cleanDirect,
       isPrimary: cmd.isPrimary,
     });
+    await this.replaceStaffDirectRules(staff.id, cmd.branchId, normalizedRules);
 
     const updateStaff = sqlUpdate(RestaurantStaffTable)
       .set({

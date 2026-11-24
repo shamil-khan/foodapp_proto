@@ -1,3 +1,4 @@
+// FILE: apps/backend/src/core/infrastructure/scoped-repository.ts (Part 1 of 2)
 import type { RequestContext } from '@/core/application/authorization';
 import { DomainError } from '@/core/domain/result';
 
@@ -15,10 +16,6 @@ export interface TenantScopeFilter {
   readonly userId?: string;
 }
 
-/**
- * Mandatory tenant/branch scope resolver used by domain repositories to guarantee
- * every query binds the active actor's tenant, branch, or customer boundary.
- */
 export class ScopedRepository {
   protected readonly request: RequestContext;
 
@@ -35,11 +32,20 @@ export class ScopedRepository {
     }
     if (
       this.request.actorSource === 'GLOBAL_USER' &&
-      this.request.globalRole === 'PLATFORM_ADMIN'
+      this.request.globalRole === 'PLATFORM_ADMIN' &&
+      this.request.supportGrant
     ) {
+      if (
+        this.request.supportGrant.branchId &&
+        requestedBranchId &&
+        requestedBranchId !== this.request.supportGrant.branchId
+      ) {
+        throw new ForbiddenTenantScopeError('Support ticket is not scoped to target branch.');
+      }
       return {
-        unrestricted: true,
-        branchId: requestedBranchId,
+        unrestricted: false,
+        restaurantId: this.request.supportGrant.restaurantId,
+        branchId: requestedBranchId ?? this.request.supportGrant.branchId,
       };
     }
     if (this.request.actorSource === 'POS_STAFF') {
@@ -58,10 +64,10 @@ export class ScopedRepository {
       };
     }
     throw new ForbiddenTenantScopeError(
-      'Branch-scoped repository access requires POS staff or admin.',
+      'Branch-scoped repository access requires POS staff or approved support ticket.',
     );
   }
-
+  // FILE: apps/backend/src/core/infrastructure/scoped-repository.ts (Part 2 of 2)
   protected resolveRestaurantScope(requestedRestaurantId?: string): TenantScopeFilter {
     if (this.request.actorSource === 'SYSTEM') {
       return {
@@ -71,11 +77,18 @@ export class ScopedRepository {
     }
     if (
       this.request.actorSource === 'GLOBAL_USER' &&
-      this.request.globalRole === 'PLATFORM_ADMIN'
+      this.request.globalRole === 'PLATFORM_ADMIN' &&
+      this.request.supportGrant
     ) {
+      if (
+        requestedRestaurantId &&
+        requestedRestaurantId !== this.request.supportGrant.restaurantId
+      ) {
+        throw new ForbiddenTenantScopeError('Support ticket is not scoped to target brand.');
+      }
       return {
-        unrestricted: true,
-        restaurantId: requestedRestaurantId,
+        unrestricted: false,
+        restaurantId: this.request.supportGrant.restaurantId,
       };
     }
     if (this.request.actorSource === 'POS_STAFF') {
@@ -95,15 +108,6 @@ export class ScopedRepository {
 
   protected resolveUserScope(targetUserId: string): TenantScopeFilter {
     if (this.request.actorSource === 'SYSTEM') {
-      return {
-        unrestricted: true,
-        userId: targetUserId,
-      };
-    }
-    if (
-      this.request.actorSource === 'GLOBAL_USER' &&
-      this.request.globalRole === 'PLATFORM_ADMIN'
-    ) {
       return {
         unrestricted: true,
         userId: targetUserId,

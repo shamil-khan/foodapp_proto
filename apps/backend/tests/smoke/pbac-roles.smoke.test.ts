@@ -70,14 +70,14 @@ describe('PBAC Rights, Custom Roles & Privilege Guards', () => {
     secondaryBranchId = secondBranch.body.branchId;
   });
 
-  it('lists 17 rights and predefined brand roles', async () => {
+  it('lists 18 rights and predefined brand roles', async () => {
     const rights = await client.get<{
       rights: unknown[];
     }>('/api/pos/roles/rights', {
       token: ownerToken,
     });
     expect(rights.status).toBe(200);
-    expect(rights.body.rights).toHaveLength(17);
+    expect(rights.body.rights).toHaveLength(18);
 
     const roles = await client.get<{
       roles: RoleSummary[];

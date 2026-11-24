@@ -136,8 +136,10 @@ async function generateSchema(): Promise<void> {
       tables.set(row.table_name, list);
     }
 
+    const generatedAt = new Date().toISOString();
     const lines: string[] = [
       '// AUTO-GENERATED FILE — DO NOT EDIT MANUALLY',
+      `// Generated at: ${generatedAt}`,
       '// Run `pnpm db:codegen` after applying new SQL migrations.',
       '',
       'export interface TableMeta<TCols extends Record<string, string>, TRow, TInsert = Partial<TRow>> {',

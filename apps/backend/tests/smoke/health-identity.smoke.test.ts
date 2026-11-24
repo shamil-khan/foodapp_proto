@@ -52,7 +52,7 @@ describe('Platform Health, Identity & Branch Switching', () => {
     expect(res.body.code).toBe('INVALID_CREDENTIALS');
   });
 
-  it('logs in Pizza Hut Owner (Tom) and inspects 17 rights via GET /api/me', async () => {
+  it('logs in Pizza Hut Owner (Tom) and inspects 18 rights via GET /api/me', async () => {
     ownerToken = await loginPosStaff(client, {
       brandHandle: 'pizza-hut',
       email: 'tom@pizza-hut.com',
@@ -70,7 +70,7 @@ describe('Platform Health, Identity & Branch Switching', () => {
 
     expect(me.status).toBe(200);
     expect(me.body.actor.source).toBe('POS_STAFF');
-    expect(me.body.actor.permissions).toHaveLength(17);
+    expect(me.body.actor.permissions).toHaveLength(18);
   });
 
   it('rejects cross-brand branch switch with 403 BRANCH_FORBIDDEN', async () => {

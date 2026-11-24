@@ -1,8 +1,9 @@
+// FILE: apps/backend/src/iam/infrastructure/pos-token-service.ts
 import { ALL_PERMISSIONS, type Permission } from '@foodapp/db';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { sign, verify } from 'hono/jwt';
-import type { PosStaffSessionClaims, StaffAssignedBranchDto } from '@/identity/domain/auth-actor';
+import type { PosStaffSessionClaims, StaffAssignedBranchDto } from '@/iam/domain/auth-actor';
 
 const POS_JWT_SECRET = process.env.BETTER_AUTH_SECRET ?? 'dev_pos_secret_change_in_prod';
 const POS_COOKIE_NAME = 'pos_staff_token';

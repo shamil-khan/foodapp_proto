@@ -57,21 +57,22 @@ import { type EventBus, InMemoryEventBus } from '@/core/application/event-bus';
 import { PgEventStore } from '@/core/infrastructure/pg-event-store';
 import { PgSagaRepository } from '@/core/infrastructure/pg-saga-repository';
 import { RedisIdempotencyStore } from '@/core/services/idempotency-middleware';
-import { SwitchPosBranchHandler } from '@/identity/application/branch-switch-command';
-import { LoginPosStaffHandler } from '@/identity/application/pos-login-command';
-import { GetCurrentActorHandler } from '@/identity/application/queries';
+import { SwitchPosBranchHandler } from '@/iam/application/branch-switch-command';
+import { LoginPosStaffHandler } from '@/iam/application/pos-login-command';
+import { GetCurrentActorHandler } from '@/iam/application/queries';
 import {
   AssignStaffBranchAccessHandler,
   CreateStaffRoleHandler,
   DeleteStaffRoleHandler,
   UpdateStaffRoleHandler,
-} from '@/identity/application/role-commands';
+} from '@/iam/application/role-commands';
 import {
   GetAssignablePermissionsHandler,
   GetRestaurantStaffRolesHandler,
-} from '@/identity/application/role-queries';
-import { RolePermissionCache } from '@/identity/infrastructure/role-permission-cache';
-import { IdentityController } from '@/identity/services/identity-controller';
+} from '@/iam/application/role-queries';
+import type { SupportAccessPort } from '@/iam/application/support-access-port';
+import { RolePermissionCache } from '@/iam/infrastructure/role-permission-cache';
+import { IamController } from '@/iam/services/iam-controller';
 import { AppLogger } from '@/logger';
 import {
   AuditLoyaltyEntryHandler,
@@ -104,6 +105,13 @@ import { DeterministicOrderGatewayAdapter } from '@/orders/infrastructure/mocks/
 import { SimulatedUkCourierAdapter } from '@/orders/infrastructure/mocks/simulated-uk-courier';
 import { OrderRepository } from '@/orders/infrastructure/order-repository';
 import { OrderController } from '@/orders/services/order-controller';
+import {
+  CreateApprovedSupportTicketHandler,
+  RevokeSupportTicketHandler,
+} from '@/support/application/support-ticket-commands';
+import { ListBrandSupportTicketsHandler } from '@/support/application/support-ticket-queries';
+import { SupportTicketRepository } from '@/support/infrastructure/support-ticket-repository';
+import { SupportController } from '@/support/services/support-controller';
 
 export type { RequestContext };
 
@@ -124,7 +132,7 @@ export const DI_TOKENS = {
     COMMAND_BUS: 'commandBus',
     QUERY_BUS: 'queryBus',
   },
-  IDENTITY: {
+  IAM: {
     ROLE_PERMISSION_CACHE: 'rolePermissionCache',
     LOGIN_POS_STAFF_HANDLER: 'loginPosStaffHandler',
     SWITCH_POS_BRANCH_HANDLER: 'switchPosBranchHandler',
@@ -135,7 +143,7 @@ export const DI_TOKENS = {
     UPDATE_STAFF_ROLE_HANDLER: 'updateStaffRoleHandler',
     DELETE_STAFF_ROLE_HANDLER: 'deleteStaffRoleHandler',
     ASSIGN_STAFF_BRANCH_ACCESS_HANDLER: 'assignStaffBranchAccessHandler',
-    CONTROLLER: 'identityController',
+    CONTROLLER: 'iamController',
   },
   CATALOG: {
     REPO: 'catalogRepo',
@@ -197,6 +205,14 @@ export const DI_TOKENS = {
     GET_ORDER_BY_ID_HANDLER: 'getOrderByIdHandler',
     GET_ORDER_EVENTS_SINCE_HANDLER: 'getOrderEventsSinceHandler',
     CONTROLLER: 'orderController',
+  },
+  SUPPORT: {
+    REPO: 'supportTicketRepository',
+    ACCESS_PORT: 'supportAccessPort',
+    CREATE_TICKET_HANDLER: 'createApprovedSupportTicketHandler',
+    REVOKE_TICKET_HANDLER: 'revokeSupportTicketHandler',
+    LIST_TICKETS_HANDLER: 'listBrandSupportTicketsHandler',
+    CONTROLLER: 'supportController',
   },
 } as const;
 
@@ -334,12 +350,12 @@ function defineBoundedContext<
 // handlers, and async domain event subscribers in one self-contained block.
 // ============================================================================
 
-// Declaring Identity bounded context:
+// Declaring iAm bounded context:
 // Handles POS staff shift authentication, global Better Auth actor resolution, and
 // dynamic tenant PBAC role/permission management. Handlers that read `DI_TOKENS.CORE.REQUEST`
 // are 'scoped' per request; `RolePermissionCache` is a 'singleton' backed by Redis.
 
-type IdentityProvides = {
+type IamProvides = {
   rolePermissionCache: Spec<RolePermissionCache, 'singleton'>;
   loginPosStaffHandler: Spec<LoginPosStaffHandler, 'singleton'>;
   switchPosBranchHandler: WithRequirements<Spec<SwitchPosBranchHandler, 'scoped'>, 'request'>;
@@ -358,25 +374,25 @@ type IdentityProvides = {
   >;
 };
 
-const identityModule = defineBoundedContext<IdentityProvides>({
-  name: 'Identity',
+const iamModule = defineBoundedContext<IamProvides>({
+  name: 'Iam',
   commandDeps: [
-    DI_TOKENS.IDENTITY.LOGIN_POS_STAFF_HANDLER,
-    DI_TOKENS.IDENTITY.SWITCH_POS_BRANCH_HANDLER,
-    DI_TOKENS.IDENTITY.CREATE_STAFF_ROLE_HANDLER,
-    DI_TOKENS.IDENTITY.UPDATE_STAFF_ROLE_HANDLER,
-    DI_TOKENS.IDENTITY.DELETE_STAFF_ROLE_HANDLER,
-    DI_TOKENS.IDENTITY.ASSIGN_STAFF_BRANCH_ACCESS_HANDLER,
+    DI_TOKENS.IAM.LOGIN_POS_STAFF_HANDLER,
+    DI_TOKENS.IAM.SWITCH_POS_BRANCH_HANDLER,
+    DI_TOKENS.IAM.CREATE_STAFF_ROLE_HANDLER,
+    DI_TOKENS.IAM.UPDATE_STAFF_ROLE_HANDLER,
+    DI_TOKENS.IAM.DELETE_STAFF_ROLE_HANDLER,
+    DI_TOKENS.IAM.ASSIGN_STAFF_BRANCH_ACCESS_HANDLER,
   ],
   queryDeps: [
-    DI_TOKENS.IDENTITY.GET_CURRENT_ACTOR_HANDLER,
-    DI_TOKENS.IDENTITY.GET_ASSIGNABLE_PERMISSIONS_HANDLER,
-    DI_TOKENS.IDENTITY.GET_RESTAURANT_STAFF_ROLES_HANDLER,
+    DI_TOKENS.IAM.GET_CURRENT_ACTOR_HANDLER,
+    DI_TOKENS.IAM.GET_ASSIGNABLE_PERMISSIONS_HANDLER,
+    DI_TOKENS.IAM.GET_RESTAURANT_STAFF_ROLES_HANDLER,
   ],
   module: (container) =>
     container
       .registerClass(
-        DI_TOKENS.IDENTITY.ROLE_PERMISSION_CACHE,
+        DI_TOKENS.IAM.ROLE_PERMISSION_CACHE,
         RolePermissionCache,
         [
           DI_TOKENS.CORE.DB,
@@ -385,32 +401,32 @@ const identityModule = defineBoundedContext<IdentityProvides>({
         'singleton',
       )
       .registerClass(
-        DI_TOKENS.IDENTITY.LOGIN_POS_STAFF_HANDLER,
+        DI_TOKENS.IAM.LOGIN_POS_STAFF_HANDLER,
         LoginPosStaffHandler,
         [
           DI_TOKENS.CORE.DB,
-          DI_TOKENS.IDENTITY.ROLE_PERMISSION_CACHE,
+          DI_TOKENS.IAM.ROLE_PERMISSION_CACHE,
         ],
         'singleton',
       )
       .registerClass(
-        DI_TOKENS.IDENTITY.SWITCH_POS_BRANCH_HANDLER,
+        DI_TOKENS.IAM.SWITCH_POS_BRANCH_HANDLER,
         SwitchPosBranchHandler,
         [
           DI_TOKENS.CORE.DB,
-          DI_TOKENS.IDENTITY.ROLE_PERMISSION_CACHE,
+          DI_TOKENS.IAM.ROLE_PERMISSION_CACHE,
           DI_TOKENS.CORE.REQUEST,
         ],
         'scoped',
       )
       .registerClass(
-        DI_TOKENS.IDENTITY.GET_ASSIGNABLE_PERMISSIONS_HANDLER,
+        DI_TOKENS.IAM.GET_ASSIGNABLE_PERMISSIONS_HANDLER,
         GetAssignablePermissionsHandler,
         [],
         'singleton',
       )
       .registerClass(
-        DI_TOKENS.IDENTITY.GET_CURRENT_ACTOR_HANDLER,
+        DI_TOKENS.IAM.GET_CURRENT_ACTOR_HANDLER,
         GetCurrentActorHandler,
         [
           DI_TOKENS.CORE.DB,
@@ -419,7 +435,7 @@ const identityModule = defineBoundedContext<IdentityProvides>({
         'scoped',
       )
       .registerClass(
-        DI_TOKENS.IDENTITY.GET_RESTAURANT_STAFF_ROLES_HANDLER,
+        DI_TOKENS.IAM.GET_RESTAURANT_STAFF_ROLES_HANDLER,
         GetRestaurantStaffRolesHandler,
         [
           DI_TOKENS.CORE.DB,
@@ -428,7 +444,7 @@ const identityModule = defineBoundedContext<IdentityProvides>({
         'scoped',
       )
       .registerClass(
-        DI_TOKENS.IDENTITY.CREATE_STAFF_ROLE_HANDLER,
+        DI_TOKENS.IAM.CREATE_STAFF_ROLE_HANDLER,
         CreateStaffRoleHandler,
         [
           DI_TOKENS.CORE.DB,
@@ -438,74 +454,171 @@ const identityModule = defineBoundedContext<IdentityProvides>({
         'scoped',
       )
       .registerClass(
-        DI_TOKENS.IDENTITY.UPDATE_STAFF_ROLE_HANDLER,
+        DI_TOKENS.IAM.UPDATE_STAFF_ROLE_HANDLER,
         UpdateStaffRoleHandler,
         [
           DI_TOKENS.CORE.DB,
-          DI_TOKENS.IDENTITY.ROLE_PERMISSION_CACHE,
+          DI_TOKENS.IAM.ROLE_PERMISSION_CACHE,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
         'scoped',
       )
       .registerClass(
-        DI_TOKENS.IDENTITY.DELETE_STAFF_ROLE_HANDLER,
+        DI_TOKENS.IAM.DELETE_STAFF_ROLE_HANDLER,
         DeleteStaffRoleHandler,
         [
           DI_TOKENS.CORE.DB,
-          DI_TOKENS.IDENTITY.ROLE_PERMISSION_CACHE,
+          DI_TOKENS.IAM.ROLE_PERMISSION_CACHE,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
         'scoped',
       )
       .registerClass(
-        DI_TOKENS.IDENTITY.ASSIGN_STAFF_BRANCH_ACCESS_HANDLER,
+        DI_TOKENS.IAM.ASSIGN_STAFF_BRANCH_ACCESS_HANDLER,
         AssignStaffBranchAccessHandler,
         [
           DI_TOKENS.CORE.DB,
-          DI_TOKENS.IDENTITY.ROLE_PERMISSION_CACHE,
+          DI_TOKENS.IAM.ROLE_PERMISSION_CACHE,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
         'scoped',
       ),
   commands: (c, commandBus) => {
-    commandBus.register('LoginPosStaff', c.get(DI_TOKENS.IDENTITY.LOGIN_POS_STAFF_HANDLER));
-    commandBus.register('SwitchPosBranch', c.get(DI_TOKENS.IDENTITY.SWITCH_POS_BRANCH_HANDLER));
-    commandBus.register('CreateStaffRole', c.get(DI_TOKENS.IDENTITY.CREATE_STAFF_ROLE_HANDLER), {
+    commandBus.register('LoginPosStaff', c.get(DI_TOKENS.IAM.LOGIN_POS_STAFF_HANDLER));
+    commandBus.register('SwitchPosBranch', c.get(DI_TOKENS.IAM.SWITCH_POS_BRANCH_HANDLER));
+    commandBus.register('CreateStaffRole', c.get(DI_TOKENS.IAM.CREATE_STAFF_ROLE_HANDLER), {
       requiredPermission: 'staff:roles:manage',
     });
-    commandBus.register('UpdateStaffRole', c.get(DI_TOKENS.IDENTITY.UPDATE_STAFF_ROLE_HANDLER), {
+    commandBus.register('UpdateStaffRole', c.get(DI_TOKENS.IAM.UPDATE_STAFF_ROLE_HANDLER), {
       requiredPermission: 'staff:roles:manage',
     });
-    commandBus.register('DeleteStaffRole', c.get(DI_TOKENS.IDENTITY.DELETE_STAFF_ROLE_HANDLER), {
+    commandBus.register('DeleteStaffRole', c.get(DI_TOKENS.IAM.DELETE_STAFF_ROLE_HANDLER), {
       requiredPermission: 'staff:roles:manage',
     });
     commandBus.register(
       'AssignStaffBranchAccess',
-      c.get(DI_TOKENS.IDENTITY.ASSIGN_STAFF_BRANCH_ACCESS_HANDLER),
+      c.get(DI_TOKENS.IAM.ASSIGN_STAFF_BRANCH_ACCESS_HANDLER),
       {
         requiredPermission: 'staff:manage',
       },
     );
   },
   queries: (c, queryBus) => {
-    queryBus.register('GetCurrentActor', c.get(DI_TOKENS.IDENTITY.GET_CURRENT_ACTOR_HANDLER));
+    queryBus.register('GetCurrentActor', c.get(DI_TOKENS.IAM.GET_CURRENT_ACTOR_HANDLER));
     queryBus.register(
       'GetAssignablePermissions',
-      c.get(DI_TOKENS.IDENTITY.GET_ASSIGNABLE_PERMISSIONS_HANDLER),
+      c.get(DI_TOKENS.IAM.GET_ASSIGNABLE_PERMISSIONS_HANDLER),
       {
         requiredPermission: 'staff:roles:manage',
       },
     );
     queryBus.register(
       'GetRestaurantStaffRoles',
-      c.get(DI_TOKENS.IDENTITY.GET_RESTAURANT_STAFF_ROLES_HANDLER),
+      c.get(DI_TOKENS.IAM.GET_RESTAURANT_STAFF_ROLES_HANDLER),
       {
         requiredPermission: 'staff:roles:manage',
       },
     );
+  },
+});
+
+// Declaring Support bounded context:
+// Manages brand-authorized JIT support tickets (including catalog update add-on attachments)
+// and exposes `supportAccessPort` so `iam` middleware can validate `X-Support-Ticket-Id`.
+
+type SupportProvides = {
+  supportTicketRepository: WithRequirements<Spec<SupportTicketRepository, 'scoped'>, 'request'>;
+  supportAccessPort: WithRequirements<Spec<SupportAccessPort, 'scoped'>, 'request'>;
+  createApprovedSupportTicketHandler: WithRequirements<
+    Spec<CreateApprovedSupportTicketHandler, 'scoped'>,
+    'request'
+  >;
+  revokeSupportTicketHandler: WithRequirements<
+    Spec<RevokeSupportTicketHandler, 'scoped'>,
+    'request'
+  >;
+  listBrandSupportTicketsHandler: WithRequirements<
+    Spec<ListBrandSupportTicketsHandler, 'scoped'>,
+    'request'
+  >;
+};
+
+const supportModule = defineBoundedContext<SupportProvides>({
+  name: 'Support',
+  commandDeps: [
+    DI_TOKENS.SUPPORT.CREATE_TICKET_HANDLER,
+    DI_TOKENS.SUPPORT.REVOKE_TICKET_HANDLER,
+  ],
+  queryDeps: [
+    DI_TOKENS.SUPPORT.LIST_TICKETS_HANDLER,
+  ],
+  module: (container) =>
+    container
+      .registerClass(
+        DI_TOKENS.SUPPORT.REPO,
+        SupportTicketRepository,
+        [
+          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerFactory(
+        DI_TOKENS.SUPPORT.ACCESS_PORT,
+        (c): SupportAccessPort => c.get(DI_TOKENS.SUPPORT.REPO),
+        [
+          DI_TOKENS.SUPPORT.REPO,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.SUPPORT.CREATE_TICKET_HANDLER,
+        CreateApprovedSupportTicketHandler,
+        [
+          DI_TOKENS.SUPPORT.REPO,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.SUPPORT.REVOKE_TICKET_HANDLER,
+        RevokeSupportTicketHandler,
+        [
+          DI_TOKENS.SUPPORT.REPO,
+          DI_TOKENS.CORE.AUTHZ,
+          DI_TOKENS.CORE.REQUEST,
+        ],
+        'scoped',
+      )
+      .registerClass(
+        DI_TOKENS.SUPPORT.LIST_TICKETS_HANDLER,
+        ListBrandSupportTicketsHandler,
+        [
+          DI_TOKENS.SUPPORT.REPO,
+          DI_TOKENS.CORE.AUTHZ,
+        ],
+        'scoped',
+      ),
+  commands: (c, commandBus) => {
+    commandBus.register(
+      'CreateApprovedSupportTicket',
+      c.get(DI_TOKENS.SUPPORT.CREATE_TICKET_HANDLER),
+      {
+        requiredPermission: 'brand:support:authorize',
+      },
+    );
+    commandBus.register('RevokeSupportTicket', c.get(DI_TOKENS.SUPPORT.REVOKE_TICKET_HANDLER), {
+      requiredPermission: 'brand:support:authorize',
+    });
+  },
+  queries: (c, queryBus) => {
+    queryBus.register('ListBrandSupportTickets', c.get(DI_TOKENS.SUPPORT.LIST_TICKETS_HANDLER), {
+      requiredPermission: 'brand:support:authorize',
+    });
   },
 });
 
@@ -1302,7 +1415,8 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
 // ============================================================================
 
 const BOUNDED_CONTEXTS = [
-  identityModule,
+  iamModule,
+  supportModule,
   catalogModule,
   loyaltyModule,
   billingModule,
@@ -1312,7 +1426,8 @@ const BOUNDED_CONTEXTS = [
 // Composes all strictly isolated bounded context modules onto `coreContainer`.
 // Every module depends solely on `CoreDeps` and communicates across boundaries via `EventBus`.
 const domainContainer = coreContainer
-  .use(identityModule.module)
+  .use(iamModule.module)
+  .use(supportModule.module)
   .use(catalogModule.module)
   .use(loyaltyModule.module)
   .use(billingModule.module)
@@ -1359,8 +1474,18 @@ export const rootContainer = domainContainer
   // Edge case: `CatalogController` omits `DI_TOKENS.CORE.REQUEST` because storefront menu
   // reads are public and tenant-specific mutations extract `restaurantId` via handlers.
   .registerClass(
-    DI_TOKENS.IDENTITY.CONTROLLER,
-    IdentityController,
+    DI_TOKENS.IAM.CONTROLLER,
+    IamController,
+    [
+      DI_TOKENS.CORE.COMMAND_BUS,
+      DI_TOKENS.CORE.QUERY_BUS,
+      DI_TOKENS.CORE.REQUEST,
+    ],
+    'scoped',
+  )
+  .registerClass(
+    DI_TOKENS.SUPPORT.CONTROLLER,
+    SupportController,
     [
       DI_TOKENS.CORE.COMMAND_BUS,
       DI_TOKENS.CORE.QUERY_BUS,
@@ -1427,7 +1552,10 @@ export interface ScopeServices {
   commandBus: CommandBus;
   queryBus: QueryBus;
   rolePermissionCache: RolePermissionCache;
-  identityController: IdentityController;
+  iamController: IamController;
+  supportTicketRepository: SupportTicketRepository;
+  supportAccessPort: SupportAccessPort;
+  supportController: SupportController;
   catalogRepo: CatalogRepository;
   branchStatusCache: BranchStatusCache;
   menuCacheHandler: MenuCacheInvalidationHandler;

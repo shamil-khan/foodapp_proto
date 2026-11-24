@@ -243,10 +243,13 @@ export class SettleMerchantHandler
       readonly netPayoutGbp: string;
     }>
   > {
-    if (!this.authz.isPlatformAdmin()) {
-      const access = this.authz.assertRestaurantAccess(cmd.restaurantId, 'ledger:read');
-      if (!access.ok) return access;
-    }
+    // FILE: apps/backend/src/billing/application/commands.ts (SettleMerchantHandler.execute)
+    const access = this.authz.assertRestaurantAccess(
+      cmd.restaurantId,
+      'ledger:read',
+      'platform:support:billing-settle',
+    );
+    if (!access.ok) return access;
 
     const rCols = RestaurantTable.cols;
     const rQ = sqlSelect(RestaurantTable)

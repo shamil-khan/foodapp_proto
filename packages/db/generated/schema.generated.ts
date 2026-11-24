@@ -1,4 +1,5 @@
 // AUTO-GENERATED FILE — DO NOT EDIT MANUALLY
+// Generated at: 2026-11-24T05:32:52.226Z
 // Run `pnpm db:codegen` after applying new SQL migrations.
 
 export interface TableMeta<TCols extends Record<string, string>, TRow, TInsert = Partial<TRow>> {
@@ -2302,7 +2303,6 @@ export interface StaffBranchAssignmentRow {
   staffId: string;
   branchId: string;
   staffRoleId: string;
-  directPermissions: string[];
   isPrimary: boolean;
   rowVersion: number;
   createdAt: Date;
@@ -2318,7 +2318,6 @@ export interface StaffBranchAssignmentInsert {
   staffId: string;
   branchId: string;
   staffRoleId: string;
-  directPermissions?: string[];
   isPrimary?: boolean;
   rowVersion?: number;
   createdAt?: Date;
@@ -2335,7 +2334,6 @@ export const StaffBranchAssignmentTable: TableMeta<
     staffId: '"staffId"';
     branchId: '"branchId"';
     staffRoleId: '"staffRoleId"';
-    directPermissions: '"directPermissions"';
     isPrimary: '"isPrimary"';
     rowVersion: '"rowVersion"';
     createdAt: '"createdAt"';
@@ -2354,8 +2352,84 @@ export const StaffBranchAssignmentTable: TableMeta<
     staffId: '"staffId"',
     branchId: '"branchId"',
     staffRoleId: '"staffRoleId"',
-    directPermissions: '"directPermissions"',
     isPrimary: '"isPrimary"',
+    rowVersion: '"rowVersion"',
+    createdAt: '"createdAt"',
+    createdBy: '"createdBy"',
+    updatedAt: '"updatedAt"',
+    updatedBy: '"updatedBy"',
+    deletedAt: '"deletedAt"',
+    deletedBy: '"deletedBy"',
+  },
+} as const;
+
+export interface StaffDirectPermissionRow {
+  id: string;
+  staffId: string;
+  branchId: string;
+  permission: string;
+  effect: string;
+  reason: string | null;
+  validFrom: Date | null;
+  expiresAt: Date | null;
+  rowVersion: number;
+  createdAt: Date;
+  createdBy: string | null;
+  updatedAt: Date;
+  updatedBy: string | null;
+  deletedAt: Date | null;
+  deletedBy: string | null;
+}
+
+export interface StaffDirectPermissionInsert {
+  id?: string;
+  staffId: string;
+  branchId: string;
+  permission: string;
+  effect?: string;
+  reason?: string | null;
+  validFrom?: Date | null;
+  expiresAt?: Date | null;
+  rowVersion?: number;
+  createdAt?: Date;
+  createdBy?: string | null;
+  updatedAt?: Date;
+  updatedBy?: string | null;
+  deletedAt?: Date | null;
+  deletedBy?: string | null;
+}
+
+export const StaffDirectPermissionTable: TableMeta<
+  {
+    id: '"id"';
+    staffId: '"staffId"';
+    branchId: '"branchId"';
+    permission: '"permission"';
+    effect: '"effect"';
+    reason: '"reason"';
+    validFrom: '"validFrom"';
+    expiresAt: '"expiresAt"';
+    rowVersion: '"rowVersion"';
+    createdAt: '"createdAt"';
+    createdBy: '"createdBy"';
+    updatedAt: '"updatedAt"';
+    updatedBy: '"updatedBy"';
+    deletedAt: '"deletedAt"';
+    deletedBy: '"deletedBy"';
+  },
+  StaffDirectPermissionRow,
+  StaffDirectPermissionInsert
+> = {
+  table: '"StaffDirectPermission"',
+  cols: {
+    id: '"id"',
+    staffId: '"staffId"',
+    branchId: '"branchId"',
+    permission: '"permission"',
+    effect: '"effect"',
+    reason: '"reason"',
+    validFrom: '"validFrom"',
+    expiresAt: '"expiresAt"',
     rowVersion: '"rowVersion"',
     createdAt: '"createdAt"',
     createdBy: '"createdBy"',
@@ -2485,6 +2559,168 @@ export const StaffRolePermissionTable: TableMeta<
     updatedBy: '"updatedBy"',
     deletedAt: '"deletedAt"',
     deletedBy: '"deletedBy"',
+  },
+} as const;
+
+export interface SupportTicketRow {
+  id: string;
+  restaurantId: string;
+  branchId: string | null;
+  requestedByStaffId: string;
+  approvedByStaffId: string | null;
+  approvedAt: Date | null;
+  assignedPlatformUserId: string | null;
+  scopePermission: string;
+  reason: string;
+  attachmentUrl: string | null;
+  attachmentNote: string | null;
+  status: string;
+  expiresAt: Date;
+  revokedByStaffId: string | null;
+  revokedAt: Date | null;
+  rowVersion: number;
+  createdAt: Date;
+  createdBy: string | null;
+  updatedAt: Date;
+  updatedBy: string | null;
+  deletedAt: Date | null;
+  deletedBy: string | null;
+}
+
+export interface SupportTicketInsert {
+  id?: string;
+  restaurantId: string;
+  branchId?: string | null;
+  requestedByStaffId: string;
+  approvedByStaffId?: string | null;
+  approvedAt?: Date | null;
+  assignedPlatformUserId?: string | null;
+  scopePermission: string;
+  reason: string;
+  attachmentUrl?: string | null;
+  attachmentNote?: string | null;
+  status?: string;
+  expiresAt: Date;
+  revokedByStaffId?: string | null;
+  revokedAt?: Date | null;
+  rowVersion?: number;
+  createdAt?: Date;
+  createdBy?: string | null;
+  updatedAt?: Date;
+  updatedBy?: string | null;
+  deletedAt?: Date | null;
+  deletedBy?: string | null;
+}
+
+export const SupportTicketTable: TableMeta<
+  {
+    id: '"id"';
+    restaurantId: '"restaurantId"';
+    branchId: '"branchId"';
+    requestedByStaffId: '"requestedByStaffId"';
+    approvedByStaffId: '"approvedByStaffId"';
+    approvedAt: '"approvedAt"';
+    assignedPlatformUserId: '"assignedPlatformUserId"';
+    scopePermission: '"scopePermission"';
+    reason: '"reason"';
+    attachmentUrl: '"attachmentUrl"';
+    attachmentNote: '"attachmentNote"';
+    status: '"status"';
+    expiresAt: '"expiresAt"';
+    revokedByStaffId: '"revokedByStaffId"';
+    revokedAt: '"revokedAt"';
+    rowVersion: '"rowVersion"';
+    createdAt: '"createdAt"';
+    createdBy: '"createdBy"';
+    updatedAt: '"updatedAt"';
+    updatedBy: '"updatedBy"';
+    deletedAt: '"deletedAt"';
+    deletedBy: '"deletedBy"';
+  },
+  SupportTicketRow,
+  SupportTicketInsert
+> = {
+  table: '"SupportTicket"',
+  cols: {
+    id: '"id"',
+    restaurantId: '"restaurantId"',
+    branchId: '"branchId"',
+    requestedByStaffId: '"requestedByStaffId"',
+    approvedByStaffId: '"approvedByStaffId"',
+    approvedAt: '"approvedAt"',
+    assignedPlatformUserId: '"assignedPlatformUserId"',
+    scopePermission: '"scopePermission"',
+    reason: '"reason"',
+    attachmentUrl: '"attachmentUrl"',
+    attachmentNote: '"attachmentNote"',
+    status: '"status"',
+    expiresAt: '"expiresAt"',
+    revokedByStaffId: '"revokedByStaffId"',
+    revokedAt: '"revokedAt"',
+    rowVersion: '"rowVersion"',
+    createdAt: '"createdAt"',
+    createdBy: '"createdBy"',
+    updatedAt: '"updatedAt"',
+    updatedBy: '"updatedBy"',
+    deletedAt: '"deletedAt"',
+    deletedBy: '"deletedBy"',
+  },
+} as const;
+
+export interface SupportTicketAuditLogRow {
+  id: string;
+  ticketId: string;
+  restaurantId: string;
+  branchId: string | null;
+  platformUserId: string;
+  scopePermission: string;
+  httpMethod: string;
+  httpPath: string;
+  targetResourceId: string | null;
+  occurredAt: Date;
+}
+
+export interface SupportTicketAuditLogInsert {
+  id?: string;
+  ticketId: string;
+  restaurantId: string;
+  branchId?: string | null;
+  platformUserId: string;
+  scopePermission: string;
+  httpMethod: string;
+  httpPath: string;
+  targetResourceId?: string | null;
+  occurredAt?: Date;
+}
+
+export const SupportTicketAuditLogTable: TableMeta<
+  {
+    id: '"id"';
+    ticketId: '"ticketId"';
+    restaurantId: '"restaurantId"';
+    branchId: '"branchId"';
+    platformUserId: '"platformUserId"';
+    scopePermission: '"scopePermission"';
+    httpMethod: '"httpMethod"';
+    httpPath: '"httpPath"';
+    targetResourceId: '"targetResourceId"';
+    occurredAt: '"occurredAt"';
+  },
+  SupportTicketAuditLogRow,
+  SupportTicketAuditLogInsert
+> = {
+  table: '"SupportTicketAuditLog"',
+  cols: {
+    id: '"id"',
+    ticketId: '"ticketId"',
+    restaurantId: '"restaurantId"',
+    branchId: '"branchId"',
+    platformUserId: '"platformUserId"',
+    scopePermission: '"scopePermission"',
+    httpMethod: '"httpMethod"',
+    httpPath: '"httpPath"',
+    targetResourceId: '"targetResourceId"',
+    occurredAt: '"occurredAt"',
   },
 } as const;
 

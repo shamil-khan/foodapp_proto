@@ -1,3 +1,4 @@
+// FILE: apps/backend/src/iam/application/queries.ts
 import { type Pool, RestaurantStaffTable, sqlSelect, UserTable } from '@foodapp/db';
 import type { RequestContext } from '@/container';
 import type { Query, QueryHandler } from '@/core/application/cqrs';

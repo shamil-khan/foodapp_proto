@@ -33,11 +33,15 @@ export const apiCorsMiddleware = cors({
     'DELETE',
     'OPTIONS',
   ],
+  // FILE: apps/backend/src/config/cors.ts (allowHeaders block)
   allowHeaders: [
     'Content-Type',
     'Authorization',
     'X-Request-Id',
+    'X-Support-Ticket-Id',
+    'Idempotency-Key',
   ],
+
   exposeHeaders: [
     'set-auth-token',
     'X-Request-Id',

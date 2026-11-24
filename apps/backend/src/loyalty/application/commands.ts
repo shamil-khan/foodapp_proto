@@ -268,7 +268,11 @@ export class UpdateLoyaltyGovernanceHandler
       if (!cmd.restaurantId) {
         return err(new DomainError('MISSING_TENANT', 'restaurantId is required.', 400));
       }
-      const access = this.authz.assertRestaurantAccess(cmd.restaurantId, 'pricing:policy:manage');
+      const access = this.authz.assertRestaurantAccess(
+        cmd.restaurantId,
+        'pricing:policy:manage',
+        'platform:support:loyalty-governance',
+      );
       if (!access.ok) return access;
     }
 

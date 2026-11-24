@@ -1,3 +1,4 @@
+// --- FILE: packages/db/src/types.ts (Part 1 of 2) ---
 export const SYSTEM_ACTORS = {
   /** 85EE = SEED (Initial database seed script) */
   SEED_SCRIPT: '00000000-0000-4000-85ee-000000000001',
@@ -28,6 +29,8 @@ export type MenuPricingPolicyMode =
 export type MenuSelectionMode = 'ALL_BRAND_ITEMS' | 'SELECTED_ITEMS_ONLY';
 export type HomePickupPrivacyMode = 'ORDER_ACCEPTANCE' | 'WHITELIST';
 export type PriceApprovalStatus = 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED';
+export type PermissionEffect = 'ALLOW' | 'DENY';
+export type SupportTicketStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'REVOKED' | 'EXPIRED';
 
 export type OrderMilestone =
   | 'PLACED'
@@ -62,6 +65,11 @@ export const TENANT_PERMISSION_REGISTRY = {
     group: 'BRAND_BRANCH',
     label: 'Create Brand Branches',
     description: 'Create new physical branches or cloud hubs under the brand',
+  },
+  'brand:support:authorize': {
+    group: 'BRAND_BRANCH',
+    label: 'Authorize Platform Support Tickets',
+    description: 'Create, approve, and revoke time-bound JIT support tickets for platform staff',
   },
   'branch:settings:manage': {
     group: 'BRAND_BRANCH',
@@ -142,10 +150,10 @@ export const TENANT_PERMISSION_REGISTRY = {
   'staff:manage': {
     group: 'LEDGER_TEAM',
     label: 'Manage Branch Staff & Rights',
-    description: 'Assign roles and direct individual permissions to staff within actor rights',
+    description: 'Assign roles and direct ALLOW/DENY permissions to staff within actor rights',
   },
 } as const satisfies Record<string, PermissionDefinition>;
-
+// --- FILE: packages/db/src/types.ts (Part 2 of 2) ---
 export type TenantPermission = keyof typeof TENANT_PERMISSION_REGISTRY;
 
 export const TENANT_PERMISSIONS = Object.keys(TENANT_PERMISSION_REGISTRY) as unknown as readonly [
@@ -171,9 +179,17 @@ export const CUSTOMER_PERMISSIONS = [
   'loyalty:redeem',
 ] as const;
 
+export const PLATFORM_SUPPORT_SCOPES = [
+  'platform:support:branch-override',
+  'platform:support:catalog-override',
+  'platform:support:billing-settle',
+  'platform:support:loyalty-governance',
+] as const;
+
 export const PLATFORM_ADMIN_PERMISSIONS = [
   'platform:restaurants:manage',
-  'platform:tenants:support',
+  'platform:loyalty:audit',
+  ...PLATFORM_SUPPORT_SCOPES,
 ] as const;
 
 export const ALL_PERMISSIONS = [
@@ -183,6 +199,7 @@ export const ALL_PERMISSIONS = [
 ] as const;
 
 export type CustomerPermission = (typeof CUSTOMER_PERMISSIONS)[number];
+export type PlatformSupportScope = (typeof PLATFORM_SUPPORT_SCOPES)[number];
 export type PlatformAdminPermission = (typeof PLATFORM_ADMIN_PERMISSIONS)[number];
 export type Permission = (typeof ALL_PERMISSIONS)[number];
 
@@ -217,6 +234,7 @@ export const SYSTEM_ROLE_DEFINITIONS = {
     legacyTenantRole: 'ADMIN',
     permissions: [
       'brand:branches:create',
+      'brand:support:authorize',
       'branch:settings:manage',
       'branch:status:manage',
       'branch:whitelist:manage',
@@ -294,7 +312,6 @@ export const SYSTEM_ROLE_DEFINITIONS = {
 
 export type SystemRoleName = keyof typeof SYSTEM_ROLE_DEFINITIONS;
 
-// REPLACE lines 289-295 in packages/db/src/types.ts:
 export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly TenantPermission[]> =
   Object.fromEntries(
     (Object.keys(SYSTEM_ROLE_DEFINITIONS) as SystemRoleName[]).map((roleName) => [

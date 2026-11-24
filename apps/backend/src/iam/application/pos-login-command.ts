@@ -1,7 +1,6 @@
+// FILE: apps/backend/src/iam/application/pos-login-command.ts (Part 1 of 2)
 import * as crypto from 'node:crypto';
 import {
-  ALL_PERMISSIONS,
-  type Permission,
   type Pool,
   RestaurantBranchTable,
   RestaurantStaffTable,
@@ -13,10 +12,8 @@ import {
 } from '@foodapp/db';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
-import type { PosStaffSessionClaims, StaffAssignedBranchDto } from '@/identity/domain/auth-actor';
-import type { RolePermissionCache } from '@/identity/infrastructure/role-permission-cache';
-
-const ALLOWED_PERM_SET = new Set<string>(ALL_PERMISSIONS);
+import type { PosStaffSessionClaims, StaffAssignedBranchDto } from '@/iam/domain/auth-actor';
+import type { RolePermissionCache } from '@/iam/infrastructure/role-permission-cache';
 
 export interface LoginPosStaffCommand extends Command<Result<PosStaffSessionClaims>> {
   readonly brandHandle: string;
@@ -103,13 +100,12 @@ export class LoginPosStaffHandler
     if (!staff || !verifyStaffPassword(cmd.password, staff.passwordHash)) {
       return err(new DomainError('INVALID_CREDENTIALS', 'Invalid POS staff credentials.', 401));
     }
-
+    // FILE: apps/backend/src/iam/application/pos-login-command.ts (Part 2 of 2)
     const aCols = StaffBranchAssignmentTable.cols;
     const assignQuery = sqlSelect(StaffBranchAssignmentTable)
       .select([
         aCols.branchId,
         aCols.staffRoleId,
-        aCols.directPermissions,
         aCols.isPrimary,
       ])
       .whereEq(aCols.staffId, staff.id)
@@ -204,18 +200,11 @@ export class LoginPosStaffHandler
       return err(new DomainError('BRANCH_FORBIDDEN', 'Target branch is not assigned.', 403));
     }
 
-    const rolePerms = await this.rolePermissionCache.getPermissionsForRole(
-      activeAssignment.staffRoleId,
-    );
-    const directPerms = (activeAssignment.directPermissions ?? []).filter((p): p is Permission =>
-      ALLOWED_PERM_SET.has(p),
-    );
-    const mergedPermissions = Array.from(
-      new Set<Permission>([
-        ...rolePerms,
-        ...directPerms,
-      ]),
-    );
+    const effectivePermissions =
+      await this.rolePermissionCache.getEffectivePermissionsForStaffBranch(
+        staff.id,
+        activeBranch.id,
+      );
 
     return ok({
       staffId: staff.id,
@@ -227,7 +216,7 @@ export class LoginPosStaffHandler
       role: staff.role as TenantRole,
       name: staff.name,
       email: staff.email,
-      permissions: mergedPermissions,
+      permissions: effectivePermissions,
       assignedBranches,
     });
   }

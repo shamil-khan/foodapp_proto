@@ -271,7 +271,11 @@ export class UpsertBranchMenuOverrideHandler
   async execute(cmd: UpsertBranchMenuOverrideCommand) {
     const requiredRight =
       cmd.proposedPrice !== undefined ? 'catalog:price:update' : 'catalog:items:manage';
-    const access = this.authz.assertBranchAccess(cmd.branchId, requiredRight);
+    const access = this.authz.assertBranchAccess(
+      cmd.branchId,
+      requiredRight,
+      'platform:support:catalog-override',
+    );
     if (!access.ok) return access;
 
     const bCols = RestaurantBranchTable.cols;
@@ -408,6 +412,7 @@ export class ReviewPriceOverrideHandler
         metadata: {
           requestId: this.request.requestId,
           actorId: this.request.actorId,
+          restaurantId: this.request.restaurantId ?? this.request.supportGrant?.restaurantId,
         },
       },
     ]);
@@ -472,8 +477,16 @@ export class CreateMenuItemHandler
     }>
   > {
     const access = cmd.branchId
-      ? this.authz.assertBranchAccess(cmd.branchId, 'catalog:items:manage')
-      : this.authz.assertRestaurantAccess(cmd.restaurantId, 'catalog:items:manage');
+      ? this.authz.assertBranchAccess(
+          cmd.branchId,
+          'catalog:items:manage',
+          'platform:support:catalog-override',
+        )
+      : this.authz.assertRestaurantAccess(
+          cmd.restaurantId,
+          'catalog:items:manage',
+          'platform:support:catalog-override',
+        );
     if (!access.ok) return access;
 
     if (cmd.branchId) {

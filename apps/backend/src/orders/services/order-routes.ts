@@ -1,3 +1,4 @@
+// FILE: apps/backend/src/orders/services/order-routes.ts (Part 1 of 2)
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@/container';
 import {
@@ -5,6 +6,7 @@ import {
   idempotencyMiddleware,
 } from '@/core/services/idempotency-middleware';
 import { openApiValidationHook } from '@/core/services/openapi-shared';
+import { requireAnyPermission, requirePermission } from '@/iam/services/auth-middleware';
 import {
   checkoutOrderRoute,
   deliveryWebhookRoute,
@@ -24,6 +26,11 @@ export function createStorefrontOrderRoutes(idempotencyStore: IdempotencyStorePo
     defaultHook: openApiValidationHook,
   });
 
+  // Public quote endpoint: POST /preview (intentionally unauthenticated)
+
+  // Customer-only cart & checkout routes (Mobile OTP login required; auth runs BEFORE idempotency lock)
+  routes.use('/cart/*', requirePermission('storefront:orders:place'));
+  routes.use('/checkout', requirePermission('storefront:orders:place'));
   routes.use(
     '/checkout',
     idempotencyMiddleware({
@@ -31,6 +38,11 @@ export function createStorefrontOrderRoutes(idempotencyStore: IdempotencyStorePo
       required: false,
     }),
   );
+
+  // Shared Customer / POS Staff order tracking & status transitions
+  routes.get('/:id', requireAnyPermission('storefront:orders:read', 'orders:read'));
+  routes.get('/:id/stream', requireAnyPermission('storefront:orders:read', 'orders:read'));
+  routes.patch('/:id/status', requireAnyPermission('storefront:orders:place', 'orders:place'));
 
   routes.openapi(getCartRoute, (c) =>
     c.var.di.get('orderController').getCart(c, c.req.valid('param')),
@@ -58,11 +70,17 @@ export function createStorefrontOrderRoutes(idempotencyStore: IdempotencyStorePo
 
   return routes;
 }
-
+// FILE: apps/backend/src/orders/services/order-routes.ts (Part 2 of 2)
 export function createPosOrderRoutes(idempotencyStore: IdempotencyStorePort) {
   const routes = new OpenAPIHono<AppEnv>({
     defaultHook: openApiValidationHook,
   });
+
+  // Fail-fast HTTP route-level PBAC guards (401 before controller or idempotency lock)
+  routes.on('GET', '/', requirePermission('orders:read'));
+  routes.on('POST', '/', requirePermission('orders:place'));
+  routes.post('/:id/settle', requirePermission('orders:settle'));
+  routes.post('/sync', requirePermission('orders:place'));
 
   routes.use(
     '/sync',

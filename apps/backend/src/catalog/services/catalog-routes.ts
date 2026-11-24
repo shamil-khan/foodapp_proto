@@ -1,3 +1,4 @@
+// FILE: apps/backend/src/catalog/services/catalog-routes.ts (Part 1 of 2)
 import { OpenAPIHono } from '@hono/zod-openapi';
 import {
   createBrandBranchRoute,
@@ -18,12 +19,64 @@ import {
 } from '@/catalog/services/catalog-schemas';
 import type { AppEnv } from '@/container';
 import { openApiValidationHook } from '@/core/services/openapi-shared';
-import { requireGlobalUser } from '@/identity/services/auth-middleware';
+import { requirePermission, requireTenantOrSupportTicket } from '@/iam/services/auth-middleware';
 
 export const catalogRoutes = new OpenAPIHono<AppEnv>({
   defaultHook: openApiValidationHook,
 });
 
+// Fail-fast HTTP route guards on POS / Brand Governance endpoints
+catalogRoutes.post('/pos/branches', requirePermission('brand:branches:create'));
+catalogRoutes.patch(
+  '/pos/branches/:branchId/status',
+  requireTenantOrSupportTicket({
+    tenantPermissions: [
+      'branch:status:manage',
+    ],
+    supportScope: 'platform:support:branch-override',
+    resolveTargetIds: (c) => ({
+      branchId: c.req.param('branchId'),
+      targetResourceId: c.req.param('branchId'),
+    }),
+  }),
+);
+catalogRoutes.patch(
+  '/pos/branches/:branchId/settings',
+  requirePermission('branch:settings:manage'),
+);
+catalogRoutes.post(
+  '/pos/branches/:branchId/whitelist',
+  requirePermission('branch:whitelist:manage'),
+);
+catalogRoutes.put('/pos/pricing-policy', requirePermission('pricing:policy:manage'));
+catalogRoutes.put(
+  '/pos/branches/:branchId/menu/:itemId',
+  requireTenantOrSupportTicket({
+    tenantPermissions: [
+      'catalog:items:manage',
+      'catalog:price:update',
+    ],
+    supportScope: 'platform:support:catalog-override',
+    resolveTargetIds: (c) => ({
+      branchId: c.req.param('branchId'),
+      targetResourceId: c.req.param('itemId'),
+    }),
+  }),
+);
+catalogRoutes.post(
+  '/pos/branches/:branchId/menu/:itemId/review',
+  requirePermission('catalog:price:approve'),
+);
+catalogRoutes.post(
+  '/pos/items',
+  requireTenantOrSupportTicket({
+    tenantPermissions: [
+      'catalog:items:manage',
+    ],
+    supportScope: 'platform:support:catalog-override',
+  }),
+);
+// FILE: apps/backend/src/catalog/services/catalog-routes.ts (Part 2 of 2)
 catalogRoutes.openapi(listBrandsRoute, (c) =>
   c.var.di.get('catalogController').listBrands(c, c.req.valid('query')),
 );
@@ -78,18 +131,8 @@ export const adminCatalogRoutes = new OpenAPIHono<AppEnv>({
   defaultHook: openApiValidationHook,
 });
 
-adminCatalogRoutes.use(
-  '/brands',
-  requireGlobalUser([
-    'PLATFORM_ADMIN',
-  ]),
-);
-adminCatalogRoutes.use(
-  '/brands/*',
-  requireGlobalUser([
-    'PLATFORM_ADMIN',
-  ]),
-);
+adminCatalogRoutes.use('/brands', requirePermission('platform:restaurants:manage'));
+adminCatalogRoutes.use('/brands/*', requirePermission('platform:restaurants:manage'));
 
 adminCatalogRoutes.openapi(createBrandByAdminRoute, (c) =>
   c.var.di.get('catalogController').createBrandByAdmin(c, c.req.valid('json')),

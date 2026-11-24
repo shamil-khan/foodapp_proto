@@ -56,12 +56,10 @@ FROM
   JOIN (
     VALUES
       ('BRAND_OWNER', 'brand:branches:create'),
+      ('BRAND_OWNER', 'brand:support:authorize'),
       ('BRAND_OWNER', 'branch:settings:manage'),
       ('BRAND_OWNER', 'branch:status:manage'),
-      (
-        'BRAND_OWNER',
-        'branch:whitelist:manage'
-      ),
+      ('BRAND_OWNER', 'branch:whitelist:manage'),
       ('BRAND_OWNER', 'catalog:items:manage'),
       ('BRAND_OWNER', 'catalog:price:update'),
       ('BRAND_OWNER', 'catalog:price:approve'),
@@ -75,79 +73,32 @@ FROM
       ('BRAND_OWNER', 'ledger:read'),
       ('BRAND_OWNER', 'staff:roles:manage'),
       ('BRAND_OWNER', 'staff:manage'),
-      (
-        'OPERATIONAL_MANAGER',
-        'brand:branches:create'
-      ),
-      (
-        'OPERATIONAL_MANAGER',
-        'branch:settings:manage'
-      ),
-      (
-        'OPERATIONAL_MANAGER',
-        'branch:status:manage'
-      ),
-      (
-        'OPERATIONAL_MANAGER',
-        'branch:whitelist:manage'
-      ),
-      (
-        'OPERATIONAL_MANAGER',
-        'catalog:items:manage'
-      ),
-      (
-        'OPERATIONAL_MANAGER',
-        'catalog:price:update'
-      ),
-      (
-        'OPERATIONAL_MANAGER',
-        'catalog:price:approve'
-      ),
+      ('OPERATIONAL_MANAGER', 'brand:branches:create'),
+      ('OPERATIONAL_MANAGER', 'brand:support:authorize'),
+      ('OPERATIONAL_MANAGER', 'branch:settings:manage'),
+      ('OPERATIONAL_MANAGER', 'branch:status:manage'),
+      ('OPERATIONAL_MANAGER', 'branch:whitelist:manage'),
+      ('OPERATIONAL_MANAGER', 'catalog:items:manage'),
+      ('OPERATIONAL_MANAGER', 'catalog:price:update'),
+      ('OPERATIONAL_MANAGER', 'catalog:price:approve'),
       ('OPERATIONAL_MANAGER', 'orders:read'),
       ('OPERATIONAL_MANAGER', 'orders:place'),
       ('OPERATIONAL_MANAGER', 'orders:settle'),
-      (
-        'OPERATIONAL_MANAGER',
-        'orders:discount:apply'
-      ),
-      (
-        'OPERATIONAL_MANAGER',
-        'orders:comp:waive'
-      ),
+      ('OPERATIONAL_MANAGER', 'orders:discount:apply'),
+      ('OPERATIONAL_MANAGER', 'orders:comp:waive'),
       ('OPERATIONAL_MANAGER', 'orders:refund'),
       ('OPERATIONAL_MANAGER', 'ledger:read'),
-      (
-        'OPERATIONAL_MANAGER',
-        'staff:roles:manage'
-      ),
+      ('OPERATIONAL_MANAGER', 'staff:roles:manage'),
       ('OPERATIONAL_MANAGER', 'staff:manage'),
-      (
-        'BRANCH_MANAGER',
-        'branch:settings:manage'
-      ),
-      (
-        'BRANCH_MANAGER',
-        'branch:status:manage'
-      ),
-      (
-        'BRANCH_MANAGER',
-        'branch:whitelist:manage'
-      ),
-      (
-        'BRANCH_MANAGER',
-        'catalog:items:manage'
-      ),
-      (
-        'BRANCH_MANAGER',
-        'catalog:price:update'
-      ),
+      ('BRANCH_MANAGER', 'branch:settings:manage'),
+      ('BRANCH_MANAGER', 'branch:status:manage'),
+      ('BRANCH_MANAGER', 'branch:whitelist:manage'),
+      ('BRANCH_MANAGER', 'catalog:items:manage'),
+      ('BRANCH_MANAGER', 'catalog:price:update'),
       ('BRANCH_MANAGER', 'orders:read'),
       ('BRANCH_MANAGER', 'orders:place'),
       ('BRANCH_MANAGER', 'orders:settle'),
-      (
-        'BRANCH_MANAGER',
-        'orders:discount:apply'
-      ),
+      ('BRANCH_MANAGER', 'orders:discount:apply'),
       ('BRANCH_MANAGER', 'orders:comp:waive'),
       ('BRANCH_MANAGER', 'orders:refund'),
       ('BRANCH_MANAGER', 'staff:roles:manage'),
@@ -157,6 +108,7 @@ FROM
       ('CASHIER', 'orders:settle')
   ) AS perm_def (role_name, permission) ON sr."name" = perm_def.role_name
 ON CONFLICT DO NOTHING;
+
 
 INSERT INTO
   "RestaurantStaff" (
@@ -204,7 +156,6 @@ INSERT INTO
     "staffId",
     "branchId",
     "staffRoleId",
-    "directPermissions",
     "isPrimary",
     "createdBy",
     "updatedBy"
@@ -213,7 +164,6 @@ SELECT
   assign_def.staff_id::UUID,
   assign_def.branch_id::UUID,
   rs."roleId",
-  '{}'::TEXT[],
   assign_def.is_primary,
   pg_temp.seed_actor(),
   pg_temp.seed_actor()

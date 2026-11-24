@@ -1,17 +1,19 @@
+// FILE: apps/backend/src/iam/services/iam-controller.ts (Part 1 of 3)
 import type { TenantPermission } from '@foodapp/db';
 import type { Context } from 'hono';
 import type { AppEnv, RequestContext } from '@/container';
 import type { CommandBus, QueryBus } from '@/core/application/cqrs';
 import { DomainError, type Result } from '@/core/domain/result';
-import type { ActiveActorProfileDto } from '@/identity/application/queries';
+import type { ActiveActorProfileDto } from '@/iam/application/queries';
+import type { DirectPermissionRuleInput } from '@/iam/application/role-commands';
 import type {
   AssignableRightsResponseDto,
   StaffRoleWithRightsDto,
-} from '@/identity/application/role-queries';
-import type { PosStaffSessionClaims } from '@/identity/domain/auth-actor';
-import { PosTokenService } from '@/identity/infrastructure/pos-token-service';
+} from '@/iam/application/role-queries';
+import type { PosStaffSessionClaims } from '@/iam/domain/auth-actor';
+import { PosTokenService } from '@/iam/infrastructure/pos-token-service';
 
-function mapIdentityError(c: Context<AppEnv>, error: DomainError) {
+function mapIamError(c: Context<AppEnv>, error: DomainError) {
   const payload = {
     code: error.code,
     error: error.message,
@@ -23,7 +25,7 @@ function mapIdentityError(c: Context<AppEnv>, error: DomainError) {
   return c.json(payload, 400);
 }
 
-export class IdentityController {
+export class IamController {
   private readonly posTokenService = new PosTokenService();
   private readonly commandBus: CommandBus;
   private readonly queryBus: QueryBus;
@@ -48,7 +50,7 @@ export class IdentityController {
       'LoginPosStaff',
       body,
     );
-    if (!result.ok) return mapIdentityError(c, result.error);
+    if (!result.ok) return mapIamError(c, result.error);
 
     const token = await this.posTokenService.issueShiftSession(c, result.value);
     return c.json(
@@ -79,7 +81,7 @@ export class IdentityController {
       'SwitchPosBranch',
       body,
     );
-    if (!result.ok) return mapIdentityError(c, result.error);
+    if (!result.ok) return mapIamError(c, result.error);
 
     const token = await this.posTokenService.issueShiftSession(c, result.value);
     return c.json(
@@ -109,7 +111,7 @@ export class IdentityController {
       200,
     );
   }
-
+  // FILE: apps/backend/src/iam/services/iam-controller.ts (Part 2 of 3)
   async getCurrentActor(c: Context<AppEnv>) {
     const profile = await this.queryBus.ask<ActiveActorProfileDto | null>('GetCurrentActor', {});
     if (!profile) {
@@ -153,7 +155,7 @@ export class IdentityController {
         200,
       );
     } catch (error) {
-      if (error instanceof DomainError) return mapIdentityError(c, error);
+      if (error instanceof DomainError) return mapIamError(c, error);
       throw error;
     }
   }
@@ -186,7 +188,7 @@ export class IdentityController {
         200,
       );
     } catch (error) {
-      if (error instanceof DomainError) return mapIdentityError(c, error);
+      if (error instanceof DomainError) return mapIamError(c, error);
       throw error;
     }
   }
@@ -226,10 +228,10 @@ export class IdentityController {
       description: body.description,
       permissions: body.permissions,
     });
-    if (!result.ok) return mapIdentityError(c, result.error);
+    if (!result.ok) return mapIamError(c, result.error);
     return c.json(result.value, 201);
   }
-
+  // FILE: apps/backend/src/iam/services/iam-controller.ts (Part 3 of 3)
   async updateStaffRole(
     c: Context<AppEnv>,
     params: {
@@ -247,7 +249,7 @@ export class IdentityController {
       description: body.description,
       permissions: body.permissions,
     });
-    if (!result.ok) return mapIdentityError(c, result.error);
+    if (!result.ok) return mapIamError(c, result.error);
     return c.json(
       {
         success: true as const,
@@ -265,7 +267,7 @@ export class IdentityController {
     const result = await this.commandBus.dispatch<Result<void, DomainError>>('DeleteStaffRole', {
       roleId: params.roleId,
     });
-    if (!result.ok) return mapIdentityError(c, result.error);
+    if (!result.ok) return mapIamError(c, result.error);
     return c.json(
       {
         success: true as const,
@@ -283,6 +285,7 @@ export class IdentityController {
       branchId?: string;
       roleId: string;
       directPermissions?: TenantPermission[];
+      directRules?: DirectPermissionRuleInput[];
       isPrimary?: boolean;
     },
   ) {
@@ -304,10 +307,11 @@ export class IdentityController {
         branchId,
         roleId: body.roleId,
         directPermissions: body.directPermissions,
+        directRules: body.directRules,
         isPrimary: body.isPrimary,
       },
     );
-    if (!result.ok) return mapIdentityError(c, result.error);
+    if (!result.ok) return mapIamError(c, result.error);
     return c.json(
       {
         success: true as const,

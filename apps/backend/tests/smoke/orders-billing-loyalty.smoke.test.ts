@@ -97,6 +97,33 @@ describe('Storefront Orders, Double-Entry Billing, Multi-Scope Loyalty & Webhook
     );
     expect(foreignItem.status).toBe(403);
     expect(foreignItem.body.code).toBe('TENANT_FORBIDDEN');
+
+    // FILE: apps/backend/tests/smoke/orders-billing-loyalty.smoke.test.ts (inside 401/403 test)
+    const unauthPosList = await client.get<{
+      code: string;
+    }>('/api/pos/orders');
+    expect(unauthPosList.status).toBe(401);
+    expect(unauthPosList.body.code).toBe('UNAUTHORIZED');
+
+    const unauthPosListWithBranch = await client.get<{
+      code: string;
+    }>(`/api/pos/orders?restaurantId=${cliftonBranchId}`);
+    expect(unauthPosListWithBranch.status).toBe(401);
+    expect(unauthPosListWithBranch.body.code).toBe('UNAUTHORIZED');
+
+    const unauthPosPlace = await client.post<{
+      code: string;
+    }>('/api/pos/orders', {
+      orderSource: 'DINE_IN',
+      items: [
+        {
+          menuItemId: pizzaHutMenuItemId,
+          quantity: 1,
+        },
+      ],
+    });
+    expect(unauthPosPlace.status).toBe(401);
+    expect(unauthPosPlace.body.code).toBe('UNAUTHORIZED');
   });
 
   it('places POS order (201), settles bill (200), blocks duplicate settle (400), and inspects billing', async () => {

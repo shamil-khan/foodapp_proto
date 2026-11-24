@@ -1,15 +1,25 @@
+// FILE: apps/backend/src/core/application/authorization.ts (Part 1 of 3)
 import {
   ALL_PERMISSIONS,
   CUSTOMER_PERMISSIONS,
   type Permission,
   PLATFORM_ADMIN_PERMISSIONS,
   type PlatformRole,
+  type PlatformSupportScope,
   type TenantRole,
 } from '@foodapp/db';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
 import { CompositeSpecification } from '@/core/patterns/specification';
 
 export type ActorSource = 'GLOBAL_USER' | 'POS_STAFF' | 'SYSTEM';
+
+export interface ActiveSupportGrant {
+  readonly ticketId: string;
+  readonly restaurantId: string;
+  readonly branchId?: string;
+  readonly scopePermission: PlatformSupportScope;
+  readonly expiresAt: string;
+}
 
 export type RequestContext = {
   requestId: string;
@@ -21,6 +31,7 @@ export type RequestContext = {
   globalRole?: PlatformRole;
   tenantRole?: TenantRole;
   permissions: readonly Permission[];
+  supportGrant?: ActiveSupportGrant;
 };
 
 export function resolveDefaultPermissionsForActor(params: {
@@ -37,7 +48,7 @@ export function resolveDefaultPermissionsForActor(params: {
   if (params.actorSource === 'GLOBAL_USER') {
     if (params.globalRole === 'PLATFORM_ADMIN') {
       return [
-        ...ALL_PERMISSIONS,
+        ...PLATFORM_ADMIN_PERMISSIONS,
       ];
     }
     if (params.globalRole === 'CUSTOMER') {
@@ -51,7 +62,9 @@ export function resolveDefaultPermissionsForActor(params: {
   return params.resolvedTenantPermissions ?? [];
 }
 
-// GoF Pattern: Specification — Composable capability check
+/**
+ * Specification checking whether the current actor possesses a specific permission.
+ */
 export class HasPermissionSpec extends CompositeSpecification<{
   request: RequestContext;
   permission: Permission;
@@ -64,14 +77,13 @@ export class HasPermissionSpec extends CompositeSpecification<{
     permission: Permission;
   }): boolean {
     if (request.actorSource === 'SYSTEM') return true;
-    if (request.actorSource === 'GLOBAL_USER' && request.globalRole === 'PLATFORM_ADMIN') {
-      return true;
-    }
     return request.permissions.includes(permission);
   }
 }
-
-// GoF Pattern: Specification — Composable multi-tenant ownership check
+// FILE: apps/backend/src/core/application/authorization.ts (Part 2 of 3)
+/**
+ * Specification enforcing multi-tenant brand isolation across all repository and handler layers.
+ */
 export class SameRestaurantSpec extends CompositeSpecification<{
   request: RequestContext;
   targetRestaurantId: string;
@@ -84,7 +96,11 @@ export class SameRestaurantSpec extends CompositeSpecification<{
     targetRestaurantId: string;
   }): boolean {
     if (request.actorSource === 'SYSTEM') return true;
-    if (request.actorSource === 'GLOBAL_USER' && request.globalRole === 'PLATFORM_ADMIN') {
+    if (
+      request.actorSource === 'GLOBAL_USER' &&
+      request.globalRole === 'PLATFORM_ADMIN' &&
+      request.supportGrant?.restaurantId === targetRestaurantId
+    ) {
       return true;
     }
     return request.actorSource === 'POS_STAFF' && request.restaurantId === targetRestaurantId;
@@ -103,7 +119,12 @@ export class SameBranchSpec extends CompositeSpecification<{
     targetBranchId: string;
   }): boolean {
     if (request.actorSource === 'SYSTEM') return true;
-    if (request.actorSource === 'GLOBAL_USER' && request.globalRole === 'PLATFORM_ADMIN') {
+    if (
+      request.actorSource === 'GLOBAL_USER' &&
+      request.globalRole === 'PLATFORM_ADMIN' &&
+      request.supportGrant &&
+      (!request.supportGrant.branchId || request.supportGrant.branchId === targetBranchId)
+    ) {
       return true;
     }
     return request.actorSource === 'POS_STAFF' && request.branchId === targetBranchId;
@@ -122,17 +143,10 @@ export class SameUserSpec extends CompositeSpecification<{
     targetUserId: string;
   }): boolean {
     if (request.actorSource === 'SYSTEM') return true;
-    if (request.actorSource === 'GLOBAL_USER' && request.globalRole === 'PLATFORM_ADMIN') {
-      return true;
-    }
     return request.actorSource === 'GLOBAL_USER' && request.actorId === targetUserId;
   }
 }
 
-/**
- * GoF Specification Pattern: Prevents privilege escalation by ensuring an actor
- * can only delegate permissions they personally hold on the active branch.
- */
 export class CanDelegatePermissionsSpec extends CompositeSpecification<{
   request: RequestContext;
   targetPermissions: readonly Permission[];
@@ -145,14 +159,11 @@ export class CanDelegatePermissionsSpec extends CompositeSpecification<{
     targetPermissions: readonly Permission[];
   }): boolean {
     if (request.actorSource === 'SYSTEM') return true;
-    if (request.actorSource === 'GLOBAL_USER' && request.globalRole === 'PLATFORM_ADMIN') {
-      return true;
-    }
     const held = new Set<Permission>(request.permissions);
     return targetPermissions.every((perm) => held.has(perm));
   }
 }
-
+// FILE: apps/backend/src/core/application/authorization.ts (Part 3 of 3)
 export class AuthorizationPolicy {
   private readonly request: RequestContext;
   private readonly hasPermissionSpec = new HasPermissionSpec();
@@ -171,6 +182,15 @@ export class AuthorizationPolicy {
     );
   }
 
+  hasSupportGrant(scope: PlatformSupportScope, targetRestaurantId?: string): boolean {
+    if (!this.isPlatformAdmin() || !this.request.supportGrant) return false;
+    if (this.request.supportGrant.scopePermission !== scope) return false;
+    if (targetRestaurantId && this.request.supportGrant.restaurantId !== targetRestaurantId) {
+      return false;
+    }
+    return new Date(this.request.supportGrant.expiresAt) > new Date();
+  }
+
   hasPermission(permission: Permission): boolean {
     return this.hasPermissionSpec.isSatisfiedBy({
       request: this.request,
@@ -187,10 +207,28 @@ export class AuthorizationPolicy {
     return ok(undefined);
   }
 
+  assertAnyPermission(permissions: readonly Permission[]): Result<void, DomainError> {
+    if (permissions.some((perm) => this.hasPermission(perm))) {
+      return ok(undefined);
+    }
+    return err(
+      new DomainError(
+        'INSUFFICIENT_RIGHTS',
+        `Missing any required right: ${permissions.join(', ')}`,
+        403,
+      ),
+    );
+  }
+
   assertRestaurantAccess(
     targetRestaurantId: string,
     requiredPermission?: Permission,
+    supportScope?: PlatformSupportScope,
   ): Result<void, DomainError> {
+    if (supportScope && this.hasSupportGrant(supportScope, targetRestaurantId)) {
+      return this.assertPermission(supportScope);
+    }
+
     const allowedTenant = this.sameRestaurantSpec.isSatisfiedBy({
       request: this.request,
       targetRestaurantId,
@@ -206,7 +244,19 @@ export class AuthorizationPolicy {
   assertBranchAccess(
     targetBranchId: string,
     requiredPermission?: Permission,
+    supportScope?: PlatformSupportScope,
   ): Result<void, DomainError> {
+    if (
+      supportScope &&
+      this.hasSupportGrant(supportScope) &&
+      this.sameBranchSpec.isSatisfiedBy({
+        request: this.request,
+        targetBranchId,
+      })
+    ) {
+      return this.assertPermission(supportScope);
+    }
+
     const allowedBranch = this.sameBranchSpec.isSatisfiedBy({
       request: this.request,
       targetBranchId,

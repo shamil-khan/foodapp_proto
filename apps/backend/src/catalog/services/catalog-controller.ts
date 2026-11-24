@@ -287,8 +287,12 @@ export class CatalogController {
     );
   }
 
+  // FILE: apps/backend/src/catalog/services/catalog-controller.ts
   async createMenuItem(c: Context<AppEnv>, body: Record<string, unknown>) {
-    const restaurantId = (body.restaurantId as string | undefined) ?? this.request.restaurantId;
+    const restaurantId =
+      (body.restaurantId as string | undefined) ??
+      this.request.supportGrant?.restaurantId ??
+      this.request.restaurantId;
     if (!restaurantId)
       return c.json(
         {

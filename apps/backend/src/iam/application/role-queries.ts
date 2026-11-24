@@ -1,3 +1,4 @@
+// FILE: apps/backend/src/iam/application/role-queries.ts (Part 1 of 2)
 import {
   type Pool,
   StaffRolePermissionTable,
@@ -80,7 +81,7 @@ export class GetRestaurantStaffRolesHandler
     );
 
     if (roles.length === 0) return [];
-
+    // FILE: apps/backend/src/iam/application/role-queries.ts (Part 2 of 2)
     const pCols = StaffRolePermissionTable.cols;
     const permsQuery = sqlSelect(StaffRolePermissionTable)
       .select([

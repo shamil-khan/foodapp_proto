@@ -1,3 +1,4 @@
+// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 1 of 4)
 import { ALL_PERMISSIONS, TENANT_PERMISSIONS } from '@foodapp/db';
 import { createRoute, z } from '@hono/zod-openapi';
 import {
@@ -8,6 +9,21 @@ import {
 
 export const TenantPermissionSchema = z.enum(TENANT_PERMISSIONS).openapi('TenantPermission');
 export const PermissionSchema = z.enum(ALL_PERMISSIONS).openapi('Permission');
+
+export const DirectPermissionRuleSchema = z
+  .object({
+    permission: TenantPermissionSchema,
+    effect: z
+      .enum([
+        'ALLOW',
+        'DENY',
+      ])
+      .default('ALLOW'),
+    reason: z.string().max(255).optional(),
+    validFrom: z.iso.datetime().optional(),
+    expiresAt: z.iso.datetime().optional(),
+  })
+  .openapi('DirectPermissionRule');
 
 export const PosLoginBodySchema = z
   .object({
@@ -74,7 +90,7 @@ export const PosLoginResponseSchema = z
     staff: PosStaffClaimsSchema,
   })
   .openapi('PosLoginResponse');
-
+// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 2 of 4)
 export const ActiveActorProfileSchema = z
   .object({
     id: z.uuid(),
@@ -158,15 +174,16 @@ export const AssignStaffBranchAccessBodySchema = z
     branchId: z.uuid().optional(),
     roleId: z.uuid(),
     directPermissions: z.array(TenantPermissionSchema).optional(),
+    directRules: z.array(DirectPermissionRuleSchema).optional(),
     isPrimary: z.boolean().optional(),
   })
   .openapi('AssignStaffBranchAccessBody');
-
+// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 3 of 4)
 export const loginPosStaffRoute = createRoute({
   method: 'post',
   path: '/pos/auth/login',
   tags: [
-    'Identity',
+    'IAM',
   ],
   summary: 'Authenticate POS staff by brand handle and issue 12h shift JWT + assigned branches',
   request: {
@@ -238,7 +255,7 @@ export const switchPosBranchRoute = createRoute({
   method: 'post',
   path: '/pos/auth/switch-branch',
   tags: [
-    'Identity',
+    'IAM',
   ],
   summary: 'Switch active branch on the single POS shift cookie and refresh branch permissions',
   security: [
@@ -276,7 +293,6 @@ export const switchPosBranchRoute = createRoute({
         },
       },
     },
-
     401: {
       description: 'Unauthorized',
       content: {
@@ -311,12 +327,12 @@ export const switchPosBranchRoute = createRoute({
     },
   },
 });
-
+// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 4 of 7)
 export const logoutPosStaffRoute = createRoute({
   method: 'post',
   path: '/pos/auth/logout',
   tags: [
-    'Identity',
+    'IAM',
   ],
   summary: 'Clear POS staff shift cookie session',
   security: [
@@ -340,7 +356,7 @@ export const getCurrentActorRoute = createRoute({
   method: 'get',
   path: '/me',
   tags: [
-    'Identity',
+    'IAM',
   ],
   summary: 'Get currently authenticated actor, active branchId, and effective permissions',
   security: [
@@ -374,7 +390,7 @@ export const listAssignablePermissionsRoute = createRoute({
   method: 'get',
   path: '/pos/roles/rights',
   tags: [
-    'Identity & Roles',
+    'IAM & Roles',
   ],
   summary: 'List all system-defined tenant rights and grouped catalog metadata',
   security: [
@@ -405,7 +421,6 @@ export const listAssignablePermissionsRoute = createRoute({
         },
       },
     },
-
     401: {
       description: 'Unauthorized',
       content: {
@@ -440,12 +455,12 @@ export const listAssignablePermissionsRoute = createRoute({
     },
   },
 });
-
+// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 5 of 7)
 export const listStaffRolesRoute = createRoute({
   method: 'get',
   path: '/pos/roles',
   tags: [
-    'Identity & Roles',
+    'IAM & Roles',
   ],
   summary: 'List predefined and custom roles for a brand',
   security: [
@@ -478,7 +493,6 @@ export const listStaffRolesRoute = createRoute({
         },
       },
     },
-
     401: {
       description: 'Unauthorized',
       content: {
@@ -518,7 +532,7 @@ export const createStaffRoleRoute = createRoute({
   method: 'post',
   path: '/pos/roles',
   tags: [
-    'Identity & Roles',
+    'IAM & Roles',
   ],
   summary: 'Create a custom role (rights cannot exceed actor permissions)',
   security: [
@@ -560,7 +574,6 @@ export const createStaffRoleRoute = createRoute({
         },
       },
     },
-
     401: {
       description: 'Unauthorized',
       content: {
@@ -595,12 +608,12 @@ export const createStaffRoleRoute = createRoute({
     },
   },
 });
-
+// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 6 of 7)
 export const updateStaffRoleRoute = createRoute({
   method: 'patch',
   path: '/pos/roles/{roleId}',
   tags: [
-    'Identity & Roles',
+    'IAM & Roles',
   ],
   summary: 'Update custom role (predefined system roles are immutable)',
   security: [
@@ -639,7 +652,6 @@ export const updateStaffRoleRoute = createRoute({
         },
       },
     },
-
     401: {
       description: 'Unauthorized',
       content: {
@@ -679,7 +691,7 @@ export const deleteStaffRoleRoute = createRoute({
   method: 'delete',
   path: '/pos/roles/{roleId}',
   tags: [
-    'Identity & Roles',
+    'IAM & Roles',
   ],
   summary: 'Soft-delete a custom role (predefined system roles are immutable)',
   security: [
@@ -710,7 +722,6 @@ export const deleteStaffRoleRoute = createRoute({
         },
       },
     },
-
     401: {
       description: 'Unauthorized',
       content: {
@@ -745,14 +756,14 @@ export const deleteStaffRoleRoute = createRoute({
     },
   },
 });
-
+// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 7 of 7)
 export const assignStaffBranchAccessRoute = createRoute({
   method: 'patch',
   path: '/pos/staff/{staffId}/branch-access',
   tags: [
-    'Identity & Roles',
+    'IAM & Roles',
   ],
-  summary: 'Assign a role and optional direct individual permissions to a staff member on a branch',
+  summary: 'Assign a role and optional ALLOW/DENY direct rules to a staff member on a branch',
   security: [
     {
       bearerAuth: [],

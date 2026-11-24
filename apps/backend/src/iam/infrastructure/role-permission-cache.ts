@@ -1,13 +1,20 @@
+// FILE: apps/backend/src/iam/infrastructure/role-permission-cache.ts (Part 1 of 2)
 import {
   ALL_PERMISSIONS,
   type Permission,
+  type PermissionEffect,
   type Pool,
   type redisClient,
   StaffBranchAssignmentTable,
+  StaffDirectPermissionTable,
   StaffRolePermissionTable,
   StaffRoleTable,
   sqlSelect,
 } from '@foodapp/db';
+import {
+  type DirectPermissionPolicyRule,
+  evaluateEffectivePermissions,
+} from '@/iam/domain/permission-evaluator';
 
 type RedisClientType = typeof redisClient;
 
@@ -27,16 +34,19 @@ export class RolePermissionCache {
     return `role:perms:${roleId}`;
   }
 
-  private keyForStaffBranch(staffId: string, branchId: string): string {
-    return `staff:branch:perms:${staffId}:${branchId}`;
+  private keyForStaffDirectRules(staffId: string, branchId: string): string {
+    return `staff:direct-rules:${staffId}:${branchId}`;
+  }
+
+  private async ensureRedisOpen(): Promise<void> {
+    if (!this.redis.isOpen) {
+      await this.redis.connect();
+    }
   }
 
   async getPermissionsForRole(roleId: string): Promise<readonly Permission[]> {
     const cacheKey = this.keyForRole(roleId);
-
-    if (!this.redis.isOpen) {
-      await this.redis.connect();
-    }
+    await this.ensureRedisOpen();
 
     const cached = await this.redis.get(cacheKey);
     if (cached) {
@@ -84,26 +94,62 @@ export class RolePermissionCache {
 
     return permissions;
   }
+  // FILE: apps/backend/src/iam/infrastructure/role-permission-cache.ts (Part 2 of 2)
+  async getDirectRulesForStaffBranch(
+    staffId: string,
+    branchId: string,
+  ): Promise<readonly DirectPermissionPolicyRule[]> {
+    const cacheKey = this.keyForStaffDirectRules(staffId, branchId);
+    await this.ensureRedisOpen();
 
+    const cached = await this.redis.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached) as DirectPermissionPolicyRule[];
+    }
+
+    const dCols = StaffDirectPermissionTable.cols;
+    const rulesQuery = sqlSelect(StaffDirectPermissionTable)
+      .select([
+        dCols.permission,
+        dCols.effect,
+        dCols.validFrom,
+        dCols.expiresAt,
+      ])
+      .whereEq(dCols.staffId, staffId)
+      .whereEq(dCols.branchId, branchId)
+      .activeOnly()
+      .compile();
+
+    const { rows } = await this.pool.query<typeof rulesQuery._result>(
+      rulesQuery.text,
+      rulesQuery.params,
+    );
+
+    const rules: DirectPermissionPolicyRule[] = rows.map((r) => ({
+      permission: r.permission,
+      effect: r.effect as PermissionEffect,
+      validFrom: r.validFrom ? new Date(r.validFrom).toISOString() : null,
+      expiresAt: r.expiresAt ? new Date(r.expiresAt).toISOString() : null,
+    }));
+
+    await this.redis.set(cacheKey, JSON.stringify(rules), {
+      EX: RolePermissionCache.TTL_SECONDS,
+    });
+    return rules;
+  }
+
+  /**
+   * Composes cached role grants with cached per-staff ALLOW/DENY rules on read so
+   * invalidating `role:perms:{roleId}` immediately updates every staff member on that role.
+   */
   async getEffectivePermissionsForStaffBranch(
     staffId: string,
     branchId: string,
   ): Promise<readonly Permission[]> {
-    const cacheKey = this.keyForStaffBranch(staffId, branchId);
-    if (!this.redis.isOpen) {
-      await this.redis.connect();
-    }
-
-    const cached = await this.redis.get(cacheKey);
-    if (cached) {
-      return JSON.parse(cached) as Permission[];
-    }
-
     const aCols = StaffBranchAssignmentTable.cols;
     const assignQuery = sqlSelect(StaffBranchAssignmentTable)
       .select([
         aCols.staffRoleId,
-        aCols.directPermissions,
       ])
       .whereEq(aCols.staffId, staffId)
       .whereEq(aCols.branchId, branchId)
@@ -119,34 +165,24 @@ export class RolePermissionCache {
       return [];
     }
 
-    const rolePerms = await this.getPermissionsForRole(assignment.staffRoleId);
-    const directPerms = (assignment.directPermissions ?? []).filter((p): p is Permission =>
-      ALLOWED_PERMISSION_SET.has(p),
-    );
-    const effective = Array.from(
-      new Set<Permission>([
-        ...rolePerms,
-        ...directPerms,
-      ]),
-    );
+    const [rolePerms, directRules] = await Promise.all([
+      this.getPermissionsForRole(assignment.staffRoleId),
+      this.getDirectRulesForStaffBranch(staffId, branchId),
+    ]);
 
-    await this.redis.set(cacheKey, JSON.stringify(effective), {
-      EX: RolePermissionCache.TTL_SECONDS,
+    return evaluateEffectivePermissions({
+      rolePermissions: rolePerms,
+      directRules,
     });
-    return effective;
   }
 
   async invalidateRole(roleId: string): Promise<void> {
-    if (!this.redis.isOpen) {
-      await this.redis.connect();
-    }
+    await this.ensureRedisOpen();
     await this.redis.del(this.keyForRole(roleId));
   }
 
   async invalidateStaffBranch(staffId: string, branchId: string): Promise<void> {
-    if (!this.redis.isOpen) {
-      await this.redis.connect();
-    }
-    await this.redis.del(this.keyForStaffBranch(staffId, branchId));
+    await this.ensureRedisOpen();
+    await this.redis.del(this.keyForStaffDirectRules(staffId, branchId));
   }
 }

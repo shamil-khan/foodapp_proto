@@ -45,6 +45,7 @@ function runBundle(): void {
 
   const header = [
     `-- AUTO-GENERATED ${spec.label.toUpperCase()} BUNDLE — DO NOT EDIT MANUALLY`,
+    `-- Generated at: ${new Date().toISOString()}`,
     `-- Regenerate with: ${spec.regenerateCmd}`,
   ].join('\n');
 

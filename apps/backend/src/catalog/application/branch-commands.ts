@@ -221,8 +221,6 @@ export class RegisterBrandHandler
     };
   }
 
-  // UPDATE the top of `async execute(cmd: RegisterBrandCommand)` in `RegisterBrandHandler`:
-
   async execute(cmd: RegisterBrandCommand) {
     const cleanHandle = slugifyKey(cmd.handle);
     if (RESERVED_BRAND_HANDLES.has(cleanHandle)) {
@@ -333,7 +331,6 @@ export class RegisterBrandHandler
           staffId: ownerStaffId,
           branchId,
           staffRoleId: ownerRoleId,
-          directPermissions: [],
           isPrimary: true,
           createdBy: this.request.actorId,
           updatedBy: this.request.actorId,
@@ -482,7 +479,6 @@ export class CreateBrandBranchHandler
           staffId: this.request.actorId,
           branchId,
           staffRoleId: this.request.roleId,
-          directPermissions: [],
           isPrimary: false,
           createdBy: this.request.actorId,
           updatedBy: this.request.actorId,
@@ -544,7 +540,12 @@ export class UpdateBranchOperationalStatusHandler
       statusLockedUntil: string | null;
     }>
   > {
-    const access = this.authz.assertBranchAccess(cmd.branchId, 'branch:status:manage');
+    // FILE: apps/backend/src/catalog/application/branch-commands.ts (UpdateBranchOperationalStatusHandler.execute)
+    const access = this.authz.assertBranchAccess(
+      cmd.branchId,
+      'branch:status:manage',
+      'platform:support:branch-override',
+    );
     if (!access.ok) return access;
 
     const bCols = RestaurantBranchTable.cols;

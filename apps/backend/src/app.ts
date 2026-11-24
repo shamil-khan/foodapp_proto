@@ -1,3 +1,4 @@
+// FILE: apps/backend/src/app.ts (Part 1 of 2)
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import { Scalar } from '@scalar/hono-api-reference';
 import { billingRoutes } from '@/billing/services/billing-routes';
@@ -6,14 +7,15 @@ import { apiCorsMiddleware } from '@/config/cors';
 import { type AppEnv, sharedIdempotencyStore } from '@/container';
 import { openApiValidationHook } from '@/core/services/openapi-shared';
 import { globalErrorHandler } from '@/errorHandler';
-import { initDiScope } from '@/identity/services/auth-middleware';
-import { identityRoutes } from '@/identity/services/identity-routes';
+import { initDiScope } from '@/iam/services/auth-middleware';
+import { iamRoutes } from '@/iam/services/iam-routes';
 import { loyaltyRoutes } from '@/loyalty/services/loyalty-routes';
 import {
   createPosOrderRoutes,
   createStorefrontOrderRoutes,
   deliveryWebhookRoutes,
 } from '@/orders/services/order-routes';
+import { supportRoutes } from '@/support/services/support-routes';
 
 const HealthResponseSchema = z
   .object({
@@ -57,7 +59,8 @@ export function createApp(options: CreateAppOptions = {}): OpenAPIHono<AppEnv> {
     app.use('/api/*', initDiScope);
   }
 
-  app.route('/api', identityRoutes);
+  app.route('/api', iamRoutes);
+  app.route('/api/pos/support-tickets', supportRoutes);
   app.route('/api/brands', catalogRoutes);
   app.route('/api/admin', adminCatalogRoutes);
   app.route('/api/orders', createStorefrontOrderRoutes(sharedIdempotencyStore));
@@ -65,7 +68,7 @@ export function createApp(options: CreateAppOptions = {}): OpenAPIHono<AppEnv> {
   app.route('/api/webhooks/delivery', deliveryWebhookRoutes);
   app.route('/api/billing', billingRoutes);
   app.route('/api/loyalty', loyaltyRoutes);
-
+  // FILE: apps/backend/src/app.ts (Part 2 of 2)
   app.openapi(healthRoute, (c) => {
     const currentDatetime = new Date().toISOString();
     c.var.di.get('log').info`health check endpoint accessed at ${currentDatetime}`;
@@ -93,7 +96,7 @@ export function createApp(options: CreateAppOptions = {}): OpenAPIHono<AppEnv> {
       title: 'FoodApp Multi-Branch POS, Storefront, Billing & Loyalty API',
       version: '1.0.0',
       description:
-        'Multi-branch restaurants, home/cloud kitchens, pricing workflows, per-branch PBAC, Event-sourced DDD/CQRS modular monolith for storefronts, offline-capable POS terminals, double-entry GBP billing, and multi-scope loyalty.',
+        'Multi-branch restaurants, home/cloud kitchens, pricing workflows, per-branch PBAC, JIT Support Tickets, Event-sourced DDD/CQRS modular monolith for storefronts, offline-capable POS terminals, double-entry GBP billing, and multi-scope loyalty.',
     },
   });
 
