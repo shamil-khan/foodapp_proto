@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/catalog/application/queries.ts
 import { type redisClient, SYSTEM_ACTORS } from '@foodapp/db';
 import type { CompiledMenuSnapshot } from '@/catalog/domain/menu-snapshot-builder';
 import type { CatalogRepository } from '@/catalog/infrastructure/catalog-repository';

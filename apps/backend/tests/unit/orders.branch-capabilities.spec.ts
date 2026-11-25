@@ -1,6 +1,9 @@
 import Decimal from 'decimal.js';
+import type { Context } from 'hono';
 import { describe, expect, it } from 'vitest';
+import type { AppEnv } from '@/container';
 import type { OrderChannel, OrderPaymentMode } from '@/orders/domain/order-events';
+import { OrderController } from '@/orders/services/order-controller';
 
 function isChannelPaymentAllowed(
   capabilities: Record<string, string[]>,
@@ -44,5 +47,45 @@ describe('orders.branch-capabilities — Channel Payment Capability & Cash Credi
     const cashReceivableGbp = new Decimal('250.00');
     const maxCreditLimitGbp = new Decimal('200.00');
     expect(cashReceivableGbp.gte(maxCreditLimitGbp)).toBe(true);
+  });
+});
+
+// Append to apps/backend/tests/unit/orders.branch-capabilities.spec.ts
+describe('OrderController.listOrders — Active Branch Resolution', () => {
+  it('defaults to request.branchId (not brand restaurantId) when no query param is supplied', async () => {
+    let askedQueryPayload: Record<string, unknown> | undefined;
+    const controller = new OrderController(
+      {} as never,
+      {
+        ask: async (_name: string, payload: Record<string, unknown>) => {
+          askedQueryPayload = payload;
+          return [];
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        requestId: 'req-list-1',
+        actorId: 'staff-1',
+        actorSource: 'POS_STAFF',
+        restaurantId: 'brand-uuid-111',
+        branchId: 'branch-uuid-222',
+        permissions: [
+          'orders:read',
+        ],
+      },
+    );
+
+    const fakeCtx = {
+      json: (body: unknown, status: number) => ({
+        body,
+        status,
+      }),
+    } as unknown as Context<AppEnv>;
+
+    await controller.listOrders(fakeCtx, {});
+    expect(askedQueryPayload?.restaurantId).toBe('branch-uuid-222');
   });
 });

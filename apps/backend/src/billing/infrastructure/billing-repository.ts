@@ -1,11 +1,11 @@
 import {
+  type DbExecutor,
   FinancialLedgerTable,
   MerchantSettlementTable,
-  type Pool,
-  type PoolClient,
   sqlInsert,
   sqlSelect,
   sqlUpdate,
+  type UnitOfWork,
 } from '@foodapp/db';
 import Decimal from 'decimal.js';
 import type { FinancialLedgerState } from '@/billing/domain/billing-aggregate';
@@ -15,14 +15,17 @@ import { formatGbp } from '@/core/domain/money';
 import { ScopedRepository } from '@/core/infrastructure/scoped-repository';
 
 export class BillingRepository extends ScopedRepository {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
 
-  constructor(pool: Pool, request: RequestContext) {
+  constructor(uow: UnitOfWork, request: RequestContext) {
     super(request);
-    this.pool = pool;
+    this.uow = uow;
   }
 
-  async loadRestaurantLedgerState(restaurantId: string): Promise<FinancialLedgerState> {
+  async loadRestaurantLedgerState(
+    restaurantId: string,
+    tx: DbExecutor = this.uow,
+  ): Promise<FinancialLedgerState> {
     this.resolveRestaurantScope(restaurantId);
 
     const fCols = FinancialLedgerTable.cols;
@@ -38,7 +41,7 @@ export class BillingRepository extends ScopedRepository {
       .activeOnly()
       .compile();
 
-    const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
+    const rows = await tx.queryMany(q);
 
     let payable = new Decimal(0);
     let cashReceivable = new Decimal(0);
@@ -73,25 +76,33 @@ export class BillingRepository extends ScopedRepository {
       readonly lines: readonly JournalLineSpec[];
       readonly actorId: string;
     },
-    client?: PoolClient,
+    tx: DbExecutor = this.uow,
   ): Promise<void> {
-    const executor = client ?? this.pool;
-    for (const line of params.lines) {
-      const ins = sqlInsert(FinancialLedgerTable)
-        .values({
-          orderId: params.orderId,
-          restaurantId: params.restaurantId,
-          entityName: `${line.accountCode}:${params.branchId}`,
-          accountCode: line.accountCode,
-          debitAmount: line.side === 'DEBIT' ? line.amountGbp : '0.00',
-          creditAmount: line.side === 'CREDIT' ? line.amountGbp : '0.00',
-          description: line.description,
-          createdBy: params.actorId,
-          updatedBy: params.actorId,
-        })
-        .compile();
-      await executor.query(ins.text, ins.params);
+    // Write all balanced double-entry journal lines atomically within a single UnitOfWork
+    const writeLines = async (exec: DbExecutor): Promise<void> => {
+      for (const line of params.lines) {
+        const ins = sqlInsert(FinancialLedgerTable)
+          .values({
+            orderId: params.orderId,
+            restaurantId: params.restaurantId,
+            entityName: `${line.accountCode}:${params.branchId}`,
+            accountCode: line.accountCode,
+            debitAmount: line.side === 'DEBIT' ? line.amountGbp : '0.00',
+            creditAmount: line.side === 'CREDIT' ? line.amountGbp : '0.00',
+            description: line.description,
+            createdBy: params.actorId,
+            updatedBy: params.actorId,
+          })
+          .compile();
+        await exec.execute(ins);
+      }
+    };
+
+    if (tx === this.uow) {
+      await this.uow.transaction(writeLines);
+      return;
     }
+    await writeLines(tx);
   }
 
   async getUnsettledCashReceivableTotal(restaurantId: string): Promise<Decimal> {
@@ -107,7 +118,7 @@ export class BillingRepository extends ScopedRepository {
       .activeOnly()
       .compile();
 
-    const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
+    const rows = await this.uow.queryMany(q);
     let total = new Decimal(0);
     for (const r of rows) {
       total = total.plus(r.debitAmount).minus(r.creditAmount);
@@ -128,7 +139,7 @@ export class BillingRepository extends ScopedRepository {
       readonly status: 'PENDING_PAYOUT' | 'PAID' | 'HELD_FROZEN';
       readonly actorId: string;
     },
-    client: PoolClient,
+    tx: DbExecutor,
   ): Promise<string> {
     const mCols = MerchantSettlementTable.cols;
     const ins = sqlInsert(MerchantSettlementTable)
@@ -150,8 +161,8 @@ export class BillingRepository extends ScopedRepository {
       ])
       .compile();
 
-    const res = await client.query<typeof ins._result>(ins.text, ins.params);
-    const settlementId = res.rows[0]?.id ?? '';
+    const inserted = await tx.queryOne(ins);
+    const settlementId = inserted?.id ?? '';
 
     const fCols = FinancialLedgerTable.cols;
     const bind = sqlUpdate(FinancialLedgerTable)
@@ -163,7 +174,7 @@ export class BillingRepository extends ScopedRepository {
       .whereNull(fCols.settlementId)
       .whereNull(fCols.deletedAt)
       .compile();
-    await client.query(bind.text, bind.params);
+    await tx.execute(bind);
 
     return settlementId;
   }

@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/support/application/support-ticket-queries.ts
 import type { AuthorizationPolicy } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
 import { DomainError } from '@/core/domain/result';

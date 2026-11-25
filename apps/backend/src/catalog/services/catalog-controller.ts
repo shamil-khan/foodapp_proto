@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/catalog/services/catalog-controller.ts (Part 1 of 2)
 import type { Context } from 'hono';
 import type { CompiledMenuSnapshot } from '@/catalog/domain/menu-snapshot-builder';
 import type { AppEnv, RequestContext } from '@/container';
@@ -77,7 +76,7 @@ export class CatalogController {
       200,
     );
   }
-  // FILE: apps/backend/src/catalog/services/catalog-controller.ts (Part 2 of 2)
+
   async upsertBranchMenuOverride(
     c: Context<AppEnv>,
     params: {

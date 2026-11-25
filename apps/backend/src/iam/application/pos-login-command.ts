@@ -1,7 +1,5 @@
-// FILE: apps/backend/src/iam/application/pos-login-command.ts (Part 1 of 2)
 import * as crypto from 'node:crypto';
 import {
-  type Pool,
   RestaurantBranchTable,
   RestaurantStaffTable,
   RestaurantTable,
@@ -9,6 +7,7 @@ import {
   StaffRoleTable,
   sqlSelect,
   type TenantRole,
+  type UnitOfWork,
 } from '@foodapp/db';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
@@ -40,11 +39,11 @@ function verifyStaffPassword(plainPassword: string, storedHash: string): boolean
 export class LoginPosStaffHandler
   implements CommandHandler<LoginPosStaffCommand, Result<PosStaffSessionClaims>>
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly rolePermissionCache: RolePermissionCache;
 
-  constructor(pool: Pool, rolePermissionCache: RolePermissionCache) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, rolePermissionCache: RolePermissionCache) {
+    this.uow = uow;
     this.rolePermissionCache = rolePermissionCache;
   }
 
@@ -60,11 +59,7 @@ export class LoginPosStaffHandler
       .whereEq(rCols.handle, cleanHandle)
       .activeOnly()
       .compile();
-    const restRes = await this.pool.query<typeof restQuery._result>(
-      restQuery.text,
-      restQuery.params,
-    );
-    const brand = restRes.rows[0];
+    const brand = await this.uow.queryOne(restQuery);
     if (!brand) {
       return err(new DomainError('INVALID_CREDENTIALS', 'Invalid POS staff credentials.', 401));
     }
@@ -92,15 +87,11 @@ export class LoginPosStaffHandler
       .whereEq(sCols.email, cmd.email.trim().toLowerCase())
       .activeOnly()
       .compile();
-    const { rows: staffRows } = await this.pool.query<typeof staffQuery._result>(
-      staffQuery.text,
-      staffQuery.params,
-    );
-    const staff = staffRows[0];
+    const staff = await this.uow.queryOne(staffQuery);
     if (!staff || !verifyStaffPassword(cmd.password, staff.passwordHash)) {
       return err(new DomainError('INVALID_CREDENTIALS', 'Invalid POS staff credentials.', 401));
     }
-    // FILE: apps/backend/src/iam/application/pos-login-command.ts (Part 2 of 2)
+
     const aCols = StaffBranchAssignmentTable.cols;
     const assignQuery = sqlSelect(StaffBranchAssignmentTable)
       .select([
@@ -111,10 +102,7 @@ export class LoginPosStaffHandler
       .whereEq(aCols.staffId, staff.id)
       .activeOnly()
       .compile();
-    const { rows: assignments } = await this.pool.query<typeof assignQuery._result>(
-      assignQuery.text,
-      assignQuery.params,
-    );
+    const assignments = await this.uow.queryMany(assignQuery);
     if (assignments.length === 0) {
       return err(
         new DomainError(
@@ -140,10 +128,7 @@ export class LoginPosStaffHandler
       )
       .activeOnly()
       .compile();
-    const { rows: branches } = await this.pool.query<typeof branchQuery._result>(
-      branchQuery.text,
-      branchQuery.params,
-    );
+    const branches = await this.uow.queryMany(branchQuery);
     const branchMap = new Map(
       branches.map((b) => [
         b.id,
@@ -163,10 +148,7 @@ export class LoginPosStaffHandler
       )
       .activeOnly()
       .compile();
-    const { rows: roleRows } = await this.pool.query<typeof rolesQuery._result>(
-      rolesQuery.text,
-      rolesQuery.params,
-    );
+    const roleRows = await this.uow.queryMany(rolesQuery);
     const roleNameMap = new Map(
       roleRows.map((r) => [
         r.id,

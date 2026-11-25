@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/brand/domain/brand-events.ts
 import type { KitchenType, MenuSelectionMode } from '@foodapp/db';
 import type { DomainEvent } from '@/core/domain/domain-event';
 

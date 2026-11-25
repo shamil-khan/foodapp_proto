@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/iam/services/iam-controller.ts (Part 1 of 3)
 import type { TenantPermission } from '@foodapp/db';
 import type { Context } from 'hono';
 import type { AppEnv, RequestContext } from '@/container';
@@ -111,7 +110,7 @@ export class IamController {
       200,
     );
   }
-  // FILE: apps/backend/src/iam/services/iam-controller.ts (Part 2 of 3)
+
   async getCurrentActor(c: Context<AppEnv>) {
     const profile = await this.queryBus.ask<ActiveActorProfileDto | null>('GetCurrentActor', {});
     if (!profile) {
@@ -231,7 +230,7 @@ export class IamController {
     if (!result.ok) return mapIamError(c, result.error);
     return c.json(result.value, 201);
   }
-  // FILE: apps/backend/src/iam/services/iam-controller.ts (Part 3 of 3)
+
   async updateStaffRole(
     c: Context<AppEnv>,
     params: {

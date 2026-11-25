@@ -12,7 +12,6 @@ describe('PBAC Rights, Custom Roles & Privilege Guards', () => {
   const handle = `pbac-brand-${Date.now()}`;
   const ownerEmail = `owner@${handle}.example.com`;
 
-  // FILE: apps/backend/tests/smoke/pbac-roles.smoke.test.ts (Lines 15-75)
   let primaryBranchId = '';
   let secondaryBranchId = '';
   let ownerToken = '';

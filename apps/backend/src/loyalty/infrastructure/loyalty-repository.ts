@@ -1,11 +1,11 @@
 import {
+  type DbExecutor,
   LoyaltyLedgerTable,
   LoyaltyProgramPolicyTable,
-  type Pool,
-  type PoolClient,
   sqlInsert,
   sqlSelect,
   sqlUpdate,
+  type UnitOfWork,
 } from '@foodapp/db';
 import Decimal from 'decimal.js';
 import type { RequestContext } from '@/core/application/authorization';
@@ -31,11 +31,11 @@ export interface LoyaltyPolicyRecord {
 }
 
 export class LoyaltyRepository extends ScopedRepository {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
 
-  constructor(pool: Pool, request: RequestContext) {
+  constructor(uow: UnitOfWork, request: RequestContext) {
     super(request);
-    this.pool = pool;
+    this.uow = uow;
   }
 
   async getProgramPolicy(
@@ -49,11 +49,12 @@ export class LoyaltyRepository extends ScopedRepository {
 
     if (issuerScope === 'MERCHANT' && restaurantId) {
       builder.whereEq(pCols.restaurantId, restaurantId);
+    } else {
+      builder.whereNull(pCols.restaurantId);
     }
 
     const q = builder.take(1).compile();
-    const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
-    const row = rows[0];
+    const row = await this.uow.queryOne(q);
 
     if (!row) {
       return {
@@ -81,12 +82,16 @@ export class LoyaltyRepository extends ScopedRepository {
       gbpPerPoint: new Decimal(row.gbpPerPoint),
     };
   }
-  async loadWalletState(params: {
-    holderType: LoyaltyHolderType;
-    holderId: string;
-    issuerScope: LoyaltyIssuerScope;
-    issuerMerchantId: string | null;
-  }): Promise<LoyaltyWalletState> {
+
+  async loadWalletState(
+    params: {
+      holderType: LoyaltyHolderType;
+      holderId: string;
+      issuerScope: LoyaltyIssuerScope;
+      issuerMerchantId: string | null;
+    },
+    tx: DbExecutor = this.uow,
+  ): Promise<LoyaltyWalletState> {
     if (params.holderType === 'CUSTOMER') {
       this.resolveUserScope(params.holderId);
     } else {
@@ -106,10 +111,12 @@ export class LoyaltyRepository extends ScopedRepository {
 
     if (params.issuerScope === 'MERCHANT' && params.issuerMerchantId) {
       builder.whereEq(lCols.issuerMerchantId, params.issuerMerchantId);
+    } else {
+      builder.whereNull(lCols.issuerMerchantId);
     }
 
     const q = builder.compile();
-    const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
+    const rows = await tx.queryMany(q);
 
     let availablePoints = 0;
     let heldPoints = 0;
@@ -161,7 +168,7 @@ export class LoyaltyRepository extends ScopedRepository {
       auditReason?: string | null;
       actorId: string;
     },
-    client?: PoolClient,
+    tx: DbExecutor = this.uow,
   ): Promise<string> {
     const lCols = LoyaltyLedgerTable.cols;
     const ins = sqlInsert(LoyaltyLedgerTable)
@@ -189,9 +196,8 @@ export class LoyaltyRepository extends ScopedRepository {
       ])
       .compile();
 
-    const executor = client ?? this.pool;
-    const res = await executor.query<typeof ins._result>(ins.text, ins.params);
-    return res.rows[0]?.id ?? '';
+    const inserted = await tx.queryOne(ins);
+    return inserted?.id ?? '';
   }
 
   async updateEntryStatus(
@@ -199,6 +205,7 @@ export class LoyaltyRepository extends ScopedRepository {
     status: LoyaltyEntryStatus,
     actorId: string,
     auditReason?: string,
+    tx: DbExecutor = this.uow,
   ): Promise<void> {
     const lCols = LoyaltyLedgerTable.cols;
     const upd = sqlUpdate(LoyaltyLedgerTable)
@@ -211,6 +218,6 @@ export class LoyaltyRepository extends ScopedRepository {
       .whereNull(lCols.deletedAt)
       .compile();
 
-    await this.pool.query(upd.text, upd.params);
+    await tx.execute(upd);
   }
 }

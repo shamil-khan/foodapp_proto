@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/iam/domain/permission-evaluator.ts
 import { ALL_PERMISSIONS, type Permission, type PermissionEffect } from '@foodapp/db';
 
 const ALLOWED_PERMISSION_SET = new Set<string>(ALL_PERMISSIONS);

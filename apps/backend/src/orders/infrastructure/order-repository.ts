@@ -1,12 +1,12 @@
 import {
+  type DbExecutor,
   OrderLineItemTable,
   OrderMilestoneLogTable,
   OrderTable,
-  type Pool,
-  type PoolClient,
   sqlInsert,
   sqlSelect,
   sqlUpdate,
+  type UnitOfWork,
 } from '@foodapp/db';
 import type { RequestContext } from '@/core/application/authorization';
 import type { EventBus } from '@/core/application/event-bus';
@@ -50,13 +50,18 @@ function mapStatusToLegacyMilestone(status: OrderStatus): string {
 }
 
 export class OrderRepository extends ScopedRepository {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly eventStore: PgEventStore;
   private readonly eventBus: EventBus;
 
-  constructor(pool: Pool, eventStore: PgEventStore, eventBus: EventBus, request: RequestContext) {
+  constructor(
+    uow: UnitOfWork,
+    eventStore: PgEventStore,
+    eventBus: EventBus,
+    request: RequestContext,
+  ) {
     super(request);
-    this.pool = pool;
+    this.uow = uow;
     this.eventStore = eventStore;
     this.eventBus = eventBus;
   }
@@ -69,10 +74,10 @@ export class OrderRepository extends ScopedRepository {
       return agg;
     }
 
-    // Fallback reconstruction for legacy seeded orders lacking event streams
+    // Fallback read-model hydration for seeded orders without prior event streams
     const oCols = OrderTable.cols;
     const oQ = sqlSelect(OrderTable).whereEq(oCols.id, orderId).activeOnly().compile();
-    const row = (await this.pool.query<typeof oQ._result>(oQ.text, oQ.params)).rows[0];
+    const row = await this.uow.queryOne(oQ);
     if (!row) return null;
 
     const liCols = OrderLineItemTable.cols;
@@ -80,8 +85,7 @@ export class OrderRepository extends ScopedRepository {
       .whereEq(liCols.orderId, orderId)
       .activeOnly()
       .compile();
-    const lineRows = (await this.pool.query<typeof liQ._result>(liQ.text, liQ.params)).rows;
-
+    const lineRows = await this.uow.queryMany(liQ);
     const items: OrderLineSnapshot[] = lineRows.map((l) => ({
       lineId: l.id,
       menuItemId: l.menuItemId ?? l.id,
@@ -148,11 +152,11 @@ export class OrderRepository extends ScopedRepository {
       .take(1)
       .compile();
 
-    const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
-    return rows[0]?.id ?? null;
+    const row = await this.uow.queryOne(q);
+    return row?.id ?? null;
   }
 
-  private async projectOrderPlaced(client: PoolClient, event: DomainEvent<unknown>): Promise<void> {
+  private async projectOrderPlaced(tx: DbExecutor, event: DomainEvent<unknown>): Promise<void> {
     const actorId = event.metadata.actorId;
     const p = event.payload as OrderPlacedPayload;
 
@@ -187,7 +191,7 @@ export class OrderRepository extends ScopedRepository {
       })
       .compile();
 
-    await client.query(insOrder.text, insOrder.params);
+    await tx.execute(insOrder);
 
     for (const item of p.items) {
       const insLine = sqlInsert(OrderLineItemTable)
@@ -208,7 +212,7 @@ export class OrderRepository extends ScopedRepository {
         })
         .compile();
 
-      await client.query(insLine.text, insLine.params);
+      await tx.execute(insLine);
     }
 
     const insLog = sqlInsert(OrderMilestoneLogTable)
@@ -220,11 +224,11 @@ export class OrderRepository extends ScopedRepository {
       })
       .compile();
 
-    await client.query(insLog.text, insLog.params);
+    await tx.execute(insLog);
   }
 
   private async projectOrderTransitioned(
-    client: PoolClient,
+    tx: DbExecutor,
     event: DomainEvent<unknown>,
   ): Promise<void> {
     const actorId = event.metadata.actorId;
@@ -245,7 +249,7 @@ export class OrderRepository extends ScopedRepository {
       .whereNull(oCols.deletedAt)
       .compile();
 
-    await client.query(upd.text, upd.params);
+    await tx.execute(upd);
 
     const logIns = sqlInsert(OrderMilestoneLogTable)
       .values({
@@ -256,13 +260,10 @@ export class OrderRepository extends ScopedRepository {
       })
       .compile();
 
-    await client.query(logIns.text, logIns.params);
+    await tx.execute(logIns);
   }
 
-  private async projectOrderSettled(
-    client: PoolClient,
-    event: DomainEvent<unknown>,
-  ): Promise<void> {
+  private async projectOrderSettled(tx: DbExecutor, event: DomainEvent<unknown>): Promise<void> {
     const actorId = event.metadata.actorId;
     const p = event.payload as OrderSettledPayload;
     const oCols = OrderTable.cols;
@@ -280,13 +281,10 @@ export class OrderRepository extends ScopedRepository {
       .whereNull(oCols.deletedAt)
       .compile();
 
-    await client.query(upd.text, upd.params);
+    await tx.execute(upd);
   }
 
-  private async projectOrderCancelled(
-    client: PoolClient,
-    event: DomainEvent<unknown>,
-  ): Promise<void> {
+  private async projectOrderCancelled(tx: DbExecutor, event: DomainEvent<unknown>): Promise<void> {
     const actorId = event.metadata.actorId;
     const p = event.payload as OrderCancelledOrRejectedPayload;
     const oCols = OrderTable.cols;
@@ -302,7 +300,7 @@ export class OrderRepository extends ScopedRepository {
       .whereNull(oCols.deletedAt)
       .compile();
 
-    await client.query(upd.text, upd.params);
+    await tx.execute(upd);
 
     const logIns = sqlInsert(OrderMilestoneLogTable)
       .values({
@@ -313,7 +311,7 @@ export class OrderRepository extends ScopedRepository {
       })
       .compile();
 
-    await client.query(logIns.text, logIns.params);
+    await tx.execute(logIns);
   }
 
   async save(aggregate: OrderAggregate): Promise<void> {
@@ -321,31 +319,25 @@ export class OrderRepository extends ScopedRepository {
     if (events.length === 0) return;
 
     const memento = aggregate.shouldTakeMemento() ? aggregate.createMemento() : undefined;
-    const client = await this.pool.connect();
 
-    try {
-      await client.query('BEGIN');
-      await this.eventStore.appendEvents(events, memento, client);
+    // Atomically append domain events, snapshot memento, and update CQRS read projections
+    await this.uow.transaction(async (tx) => {
+      await this.eventStore.appendEvents(events, memento, tx);
 
       for (const event of events) {
         if (event.eventType === 'OrderPlaced') {
-          await this.projectOrderPlaced(client, event);
+          await this.projectOrderPlaced(tx, event);
         } else if (event.eventType === 'OrderTransitioned') {
-          await this.projectOrderTransitioned(client, event);
+          await this.projectOrderTransitioned(tx, event);
         } else if (event.eventType === 'OrderSettled') {
-          await this.projectOrderSettled(client, event);
+          await this.projectOrderSettled(tx, event);
         } else if (event.eventType === 'OrderCancelledOrRejected') {
-          await this.projectOrderCancelled(client, event);
+          await this.projectOrderCancelled(tx, event);
         }
       }
+    });
 
-      await client.query('COMMIT');
-      await this.eventBus.publish(events);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    // Publish events strictly post-commit so subscribers & Sagas observe durable state
+    await this.eventBus.publish(events);
   }
 }

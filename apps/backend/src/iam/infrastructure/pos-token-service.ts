@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/iam/infrastructure/pos-token-service.ts
 import { ALL_PERMISSIONS, type Permission } from '@foodapp/db';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';

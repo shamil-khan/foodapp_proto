@@ -1,9 +1,7 @@
-// FILE: apps/backend/src/brand/application/queries.ts (Part 1 of 3)
 import {
   type HomePickupPrivacyMode,
   type KitchenType,
   type OperationalStatus,
-  type Pool,
   RestaurantBranchTable,
   RestaurantLayoutTable,
   RestaurantTable,
@@ -18,6 +16,7 @@ import {
 import type { BranchStatusCache } from '@/brand/infrastructure/branch-status-cache';
 import type { RequestContext } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
+import type { ReadRepository } from '@/core/infrastructure/read-repository';
 
 export interface StorefrontBranchDto {
   id: string;
@@ -73,12 +72,12 @@ export interface ListBrandsQuery extends Query<StorefrontBrandDto[]> {
   readonly skip?: number;
   readonly take?: number;
 }
-// FILE: apps/backend/src/brand/application/queries.ts (Part 2 of 3)
-export class ListBrandsHandler implements QueryHandler<ListBrandsQuery, StorefrontBrandDto[]> {
-  private readonly pool: Pool;
 
-  constructor(pool: Pool) {
-    this.pool = pool;
+export class ListBrandsHandler implements QueryHandler<ListBrandsQuery, StorefrontBrandDto[]> {
+  private readonly readRepo: ReadRepository;
+
+  constructor(readRepo: ReadRepository) {
+    this.readRepo = readRepo;
   }
 
   async execute(query: ListBrandsQuery): Promise<StorefrontBrandDto[]> {
@@ -98,13 +97,12 @@ export class ListBrandsHandler implements QueryHandler<ListBrandsQuery, Storefro
     if (query.search?.trim()) {
       builder.whereILike(rCols.name, `%${query.search.trim()}%`);
     }
-
     const q = builder
       .orderBy(rCols.name, 'ASC')
       .skip(query.skip ?? 0)
       .take(Math.min(query.take ?? 20, 100))
       .compile();
-    const { rows: brands } = await this.pool.query<typeof q._result>(q.text, q.params);
+    const brands = await this.readRepo.findMany(q);
     if (brands.length === 0) return [];
 
     const lCols = RestaurantLayoutTable.cols;
@@ -122,7 +120,7 @@ export class ListBrandsHandler implements QueryHandler<ListBrandsQuery, Storefro
       )
       .activeOnly()
       .compile();
-    const { rows: layouts } = await this.pool.query<typeof lq._result>(lq.text, lq.params);
+    const layouts = await this.readRepo.findMany(lq);
     const layoutMap = new Map(
       layouts.map((l) => [
         l.restaurantId,
@@ -155,16 +153,16 @@ export class ListBrandsHandler implements QueryHandler<ListBrandsQuery, Storefro
 export interface ResolveBrandByHandleQuery extends Query<BrandStorefrontResponseDto | null> {
   readonly brandHandle: string;
 }
-// FILE: apps/backend/src/brand/application/queries.ts (Part 3 of 3)
+
 export class ResolveBrandByHandleHandler
   implements QueryHandler<ResolveBrandByHandleQuery, BrandStorefrontResponseDto | null>
 {
-  private readonly pool: Pool;
+  private readonly readRepo: ReadRepository;
   private readonly statusCache: BranchStatusCache;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, statusCache: BranchStatusCache, request: RequestContext) {
-    this.pool = pool;
+  constructor(readRepo: ReadRepository, statusCache: BranchStatusCache, request: RequestContext) {
+    this.readRepo = readRepo;
     this.statusCache = statusCache;
     this.request = request;
   }
@@ -184,8 +182,7 @@ export class ResolveBrandByHandleHandler
       .whereEq(rCols.isActiveOverride, true)
       .activeOnly()
       .compile();
-    const rRes = await this.pool.query<typeof rq._result>(rq.text, rq.params);
-    const brandRow = rRes.rows[0];
+    const brandRow = await this.readRepo.findOne(rq);
     if (!brandRow) return null;
 
     const lCols = RestaurantLayoutTable.cols;
@@ -199,9 +196,7 @@ export class ResolveBrandByHandleHandler
       .whereEq(lCols.restaurantId, brandRow.id)
       .activeOnly()
       .compile();
-    const lRes = await this.pool.query<typeof lq._result>(lq.text, lq.params);
-    const layout = lRes.rows[0];
-
+    const layout = await this.readRepo.findOne(lq);
     const brand: StorefrontBrandDto = {
       id: brandRow.id,
       name: brandRow.name,
@@ -227,7 +222,7 @@ export class ResolveBrandByHandleHandler
       .orderBy(bCols.city, 'ASC')
       .orderBy(bCols.name, 'ASC')
       .compile();
-    const { rows: branchRows } = await this.pool.query<typeof bq._result>(bq.text, bq.params);
+    const branchRows = await this.readRepo.findMany(bq);
     if (branchRows.length === 0) return null;
 
     const isPrivileged =
@@ -256,6 +251,7 @@ export class ResolveBrandByHandleHandler
           supportsPlatformDelivery: b.supportsPlatformDelivery,
           averagePrepTimeMinutes: b.averagePrepTimeMinutes,
           scheduleConfig: b.scheduleConfig,
+          // Mask home-kitchen exact street address unless viewer is approved on takeaway whitelist or staff
           location: projectBranchLocationForViewer(
             {
               kitchenType: b.kitchenType as KitchenType,
@@ -339,8 +335,8 @@ export class ResolveBranchBySlugHandler
 {
   private readonly resolver: ResolveBrandByHandleHandler;
 
-  constructor(pool: Pool, statusCache: BranchStatusCache, request: RequestContext) {
-    this.resolver = new ResolveBrandByHandleHandler(pool, statusCache, request);
+  constructor(readRepo: ReadRepository, statusCache: BranchStatusCache, request: RequestContext) {
+    this.resolver = new ResolveBrandByHandleHandler(readRepo, statusCache, request);
   }
 
   async execute(query: ResolveBranchBySlugQuery): Promise<{

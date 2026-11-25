@@ -1,5 +1,4 @@
-// FILE: apps/backend/src/brand/application/admin-brand-commands.ts
-import { type KitchenType, type Pool, RestaurantTable, sqlUpdate } from '@foodapp/db';
+import { type KitchenType, RestaurantTable, sqlUpdate, type UnitOfWork } from '@foodapp/db';
 import {
   type RegisterBrandCommand,
   RegisterBrandHandler,
@@ -45,13 +44,18 @@ export class CreateRestaurantByAdminHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly eventBus: EventBus;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, eventBus: EventBus, authz: AuthorizationPolicy, request: RequestContext) {
-    this.pool = pool;
+  constructor(
+    uow: UnitOfWork,
+    eventBus: EventBus,
+    authz: AuthorizationPolicy,
+    request: RequestContext,
+  ) {
+    this.uow = uow;
     this.eventBus = eventBus;
     this.authz = authz;
     this.request = request;
@@ -68,7 +72,8 @@ export class CreateRestaurantByAdminHandler
     const permCheck = this.authz.assertPermission('platform:restaurants:manage');
     if (!permCheck.ok) return permCheck;
 
-    const registerHandler = new RegisterBrandHandler(this.pool, this.eventBus, this.request);
+    // Delegate tenant bootstrap to RegisterBrandHandler so admin & self-serve share identical UnitOfWork + Saga flow
+    const registerHandler = new RegisterBrandHandler(this.uow, this.eventBus, this.request);
     const registerCmd: RegisterBrandCommand = {
       brandName: cmd.name,
       handle: cmd.handle,
@@ -105,12 +110,12 @@ export interface UpdateRestaurantStatusByAdminCommand extends Command<Result<voi
 export class UpdateRestaurantStatusByAdminHandler
   implements CommandHandler<UpdateRestaurantStatusByAdminCommand, Result<void>>
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, authz: AuthorizationPolicy, request: RequestContext) {
+    this.uow = uow;
     this.authz = authz;
     this.request = request;
   }
@@ -129,8 +134,9 @@ export class UpdateRestaurantStatusByAdminHandler
       .whereNull(rCols.deletedAt)
       .compile();
 
-    const res = await this.pool.query(updateCmd.text, updateCmd.params);
-    if ((res.rowCount ?? 0) === 0) {
+    // Single-statement write executes directly via UnitOfWork without extra transaction ceremony
+    const rowCount = await this.uow.execute(updateCmd);
+    if (rowCount === 0) {
       return err(new DomainError('RESTAURANT_NOT_FOUND', 'Restaurant brand not found.', 404));
     }
 

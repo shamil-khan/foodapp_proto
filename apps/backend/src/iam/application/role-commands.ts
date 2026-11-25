@@ -1,7 +1,6 @@
-// FILE: apps/backend/src/iam/application/role-commands.ts (Part 1 of 4)
 import {
+  type DbExecutor,
   type PermissionEffect,
-  type Pool,
   RestaurantBranchTable,
   RestaurantStaffTable,
   StaffBranchAssignmentTable,
@@ -15,6 +14,7 @@ import {
   TENANT_PERMISSIONS,
   type TenantPermission,
   type TenantRole,
+  type UnitOfWork,
 } from '@foodapp/db';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
@@ -52,12 +52,12 @@ export class CreateStaffRoleHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, authz: AuthorizationPolicy, request: RequestContext) {
+    this.uow = uow;
     this.authz = authz;
     this.request = request;
   }
@@ -81,7 +81,6 @@ export class CreateStaffRoleHandler
     // Prevent privilege escalation: actors can only grant rights they personally hold
     const delegateCheck = this.authz.assertCanDelegate(cleanPerms);
     if (!delegateCheck.ok) return delegateCheck;
-
     const rCols = StaffRoleTable.cols;
     const dupCheck = sqlSelect(StaffRoleTable)
       .select([
@@ -92,17 +91,14 @@ export class CreateStaffRoleHandler
       .activeOnly()
       .compile();
 
-    const dupRes = await this.pool.query<typeof dupCheck._result>(dupCheck.text, dupCheck.params);
-    if (dupRes.rows[0]) {
+    if (await this.uow.exists(dupCheck)) {
       return err(
         new DomainError('ROLE_EXISTS', `Role "${cleanName}" already exists in this brand.`, 409),
       );
     }
 
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-
+    // Atomically create StaffRole and all StaffRolePermission rows inside one UnitOfWork
+    const createdRoleId = await this.uow.transaction(async (tx) => {
       const insertRole = sqlInsert(StaffRoleTable)
         .values({
           restaurantId: cmd.restaurantId,
@@ -117,42 +113,35 @@ export class CreateStaffRoleHandler
         ])
         .compile();
 
-      const roleRes = await client.query<typeof insertRole._result>(
-        insertRole.text,
-        insertRole.params,
-      );
-      const createdRoleId = roleRes.rows[0]?.id;
-      if (!createdRoleId) {
+      const roleRow = await tx.queryOne(insertRole);
+      const roleId = roleRow?.id;
+      if (!roleId) {
         throw new Error('Failed to create StaffRole record');
       }
 
       for (const perm of cleanPerms) {
         const insertPerm = sqlInsert(StaffRolePermissionTable)
           .values({
-            staffRoleId: createdRoleId,
+            staffRoleId: roleId,
             permission: perm,
             createdBy: this.request.actorId,
             updatedBy: this.request.actorId,
           })
           .compile();
-        await client.query(insertPerm.text, insertPerm.params);
+        await tx.execute(insertPerm);
       }
 
-      await client.query('COMMIT');
-      return ok({
-        roleId: createdRoleId,
-        name: cleanName,
-        permissions: cleanPerms,
-      });
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+      return roleId;
+    });
+
+    return ok({
+      roleId: createdRoleId,
+      name: cleanName,
+      permissions: cleanPerms,
+    });
   }
 }
-// FILE: apps/backend/src/iam/application/role-commands.ts (Part 2 of 4)
+
 export interface UpdateStaffRoleCommand extends Command<Result<void>> {
   readonly roleId: string;
   readonly name?: string;
@@ -163,18 +152,18 @@ export interface UpdateStaffRoleCommand extends Command<Result<void>> {
 export class UpdateStaffRoleHandler
   implements CommandHandler<UpdateStaffRoleCommand, Result<void>>
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly rolePermissionCache: RolePermissionCache;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
   constructor(
-    pool: Pool,
+    uow: UnitOfWork,
     rolePermissionCache: RolePermissionCache,
     authz: AuthorizationPolicy,
     request: RequestContext,
   ) {
-    this.pool = pool;
+    this.uow = uow;
     this.rolePermissionCache = rolePermissionCache;
     this.authz = authz;
     this.request = request;
@@ -193,11 +182,7 @@ export class UpdateStaffRoleHandler
       .activeOnly()
       .compile();
 
-    const roleRes = await this.pool.query<typeof roleQuery._result>(
-      roleQuery.text,
-      roleQuery.params,
-    );
-    const role = roleRes.rows[0];
+    const role = await this.uow.queryOne(roleQuery);
     if (!role) {
       return err(new DomainError('ROLE_NOT_FOUND', `Role ${cmd.roleId} not found.`, 404));
     }
@@ -224,10 +209,7 @@ export class UpdateStaffRoleHandler
     const delegateCheck = this.authz.assertCanDelegate(cleanPerms);
     if (!delegateCheck.ok) return delegateCheck;
 
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-
+    await this.uow.transaction(async (tx) => {
       const nextName = cmd.name ? cmd.name.trim().toUpperCase() : role.name;
       const updateRole = sqlUpdate(StaffRoleTable)
         .set({
@@ -239,7 +221,7 @@ export class UpdateStaffRoleHandler
         .whereNull(rCols.deletedAt)
         .compile();
 
-      await client.query(updateRole.text, updateRole.params);
+      await tx.execute(updateRole);
 
       const pCols = StaffRolePermissionTable.cols;
       const existingPermsQuery = sqlSelect(StaffRolePermissionTable)
@@ -250,14 +232,11 @@ export class UpdateStaffRoleHandler
         .activeOnly()
         .compile();
 
-      const existingPerms = await client.query<typeof existingPermsQuery._result>(
-        existingPermsQuery.text,
-        existingPermsQuery.params,
-      );
+      const existingPerms = await tx.queryMany(existingPermsQuery);
 
-      for (const existing of existingPerms.rows) {
+      for (const existing of existingPerms) {
         const delCmd = sqlSoftDelete(StaffRolePermissionTable, existing.id, this.request.actorId);
-        await client.query(delCmd.text, delCmd.params);
+        await tx.execute(delCmd);
       }
 
       for (const perm of cleanPerms) {
@@ -269,22 +248,16 @@ export class UpdateStaffRoleHandler
             updatedBy: this.request.actorId,
           })
           .compile();
-        await client.query(insertPerm.text, insertPerm.params);
+        await tx.execute(insertPerm);
       }
+    });
 
-      await client.query('COMMIT');
-      // Zero-fan-out invalidation: RolePermissionCache composes role + direct rules on read
-      await this.rolePermissionCache.invalidateRole(role.id);
-      return ok(undefined);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    // Zero-fan-out invalidation strictly post-commit: RolePermissionCache composes role + direct rules on read
+    await this.rolePermissionCache.invalidateRole(role.id);
+    return ok(undefined);
   }
 }
-// FILE: apps/backend/src/iam/application/role-commands.ts (Part 3 of 4)
+
 export interface DeleteStaffRoleCommand extends Command<Result<void>> {
   readonly roleId: string;
 }
@@ -292,18 +265,18 @@ export interface DeleteStaffRoleCommand extends Command<Result<void>> {
 export class DeleteStaffRoleHandler
   implements CommandHandler<DeleteStaffRoleCommand, Result<void>>
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly rolePermissionCache: RolePermissionCache;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
   constructor(
-    pool: Pool,
+    uow: UnitOfWork,
     rolePermissionCache: RolePermissionCache,
     authz: AuthorizationPolicy,
     request: RequestContext,
   ) {
-    this.pool = pool;
+    this.uow = uow;
     this.rolePermissionCache = rolePermissionCache;
     this.authz = authz;
     this.request = request;
@@ -321,11 +294,7 @@ export class DeleteStaffRoleHandler
       .activeOnly()
       .compile();
 
-    const roleRes = await this.pool.query<typeof roleQuery._result>(
-      roleQuery.text,
-      roleQuery.params,
-    );
-    const role = roleRes.rows[0];
+    const role = await this.uow.queryOne(roleQuery);
     if (!role) {
       return err(new DomainError('ROLE_NOT_FOUND', `Role ${cmd.roleId} not found.`, 404));
     }
@@ -349,11 +318,7 @@ export class DeleteStaffRoleHandler
       .take(1)
       .compile();
 
-    const assignedRes = await this.pool.query<typeof assignedQuery._result>(
-      assignedQuery.text,
-      assignedQuery.params,
-    );
-    if (assignedRes.rows[0]) {
+    if (await this.uow.exists(assignedQuery)) {
       return err(
         new DomainError(
           'ROLE_IN_USE',
@@ -364,7 +329,7 @@ export class DeleteStaffRoleHandler
     }
 
     const delCmd = sqlSoftDelete(StaffRoleTable, role.id, this.request.actorId);
-    await this.pool.query(delCmd.text, delCmd.params);
+    await this.uow.execute(delCmd);
     await this.rolePermissionCache.invalidateRole(role.id);
     return ok(undefined);
   }
@@ -386,7 +351,7 @@ export interface AssignStaffBranchAccessCommand extends Command<Result<void>> {
   readonly directRules?: readonly DirectPermissionRuleInput[];
   readonly isPrimary?: boolean;
 }
-// FILE: apps/backend/src/iam/application/role-commands.ts (Part 4 of 4)
+
 function mapRoleNameToLegacyEnum(roleName: string): TenantRole {
   if (roleName === 'OWNER' || roleName === 'BRAND_OWNER') return 'OWNER';
   if (roleName === 'OPERATIONAL_MANAGER') return 'ADMIN';
@@ -397,18 +362,18 @@ function mapRoleNameToLegacyEnum(roleName: string): TenantRole {
 export class AssignStaffBranchAccessHandler
   implements CommandHandler<AssignStaffBranchAccessCommand, Result<void>>
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly rolePermissionCache: RolePermissionCache;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
   constructor(
-    pool: Pool,
+    uow: UnitOfWork,
     rolePermissionCache: RolePermissionCache,
     authz: AuthorizationPolicy,
     request: RequestContext,
   ) {
-    this.pool = pool;
+    this.uow = uow;
     this.rolePermissionCache = rolePermissionCache;
     this.authz = authz;
     this.request = request;
@@ -456,10 +421,12 @@ export class AssignStaffBranchAccessHandler
     return Array.from(byPerm.values());
   }
 
+  // 2. Update `replaceStaffDirectRules` & `upsertAssignment` signatures to accept `tx: DbExecutor = this.uow` and execute on `tx`:
   private async replaceStaffDirectRules(
     staffId: string,
     branchId: string,
     rules: ReturnType<AssignStaffBranchAccessHandler['normalizeDirectRules']>,
+    tx: DbExecutor = this.uow,
   ): Promise<void> {
     const dCols = StaffDirectPermissionTable.cols;
     const existingQ = sqlSelect(StaffDirectPermissionTable)
@@ -470,13 +437,11 @@ export class AssignStaffBranchAccessHandler
       .whereEq(dCols.branchId, branchId)
       .activeOnly()
       .compile();
-    const existingRows = (
-      await this.pool.query<typeof existingQ._result>(existingQ.text, existingQ.params)
-    ).rows;
+    const existingRows = await tx.queryMany(existingQ);
 
     for (const row of existingRows) {
       const del = sqlSoftDelete(StaffDirectPermissionTable, row.id, this.request.actorId);
-      await this.pool.query(del.text, del.params);
+      await tx.execute(del);
     }
 
     for (const rule of rules) {
@@ -493,16 +458,19 @@ export class AssignStaffBranchAccessHandler
           updatedBy: this.request.actorId,
         })
         .compile();
-      await this.pool.query(ins.text, ins.params);
+      await tx.execute(ins);
     }
   }
 
-  private async upsertAssignment(params: {
-    staffId: string;
-    branchId: string;
-    roleId: string;
-    isPrimary?: boolean;
-  }): Promise<void> {
+  private async upsertAssignment(
+    params: {
+      staffId: string;
+      branchId: string;
+      roleId: string;
+      isPrimary?: boolean;
+    },
+    tx: DbExecutor = this.uow,
+  ): Promise<void> {
     const aCols = StaffBranchAssignmentTable.cols;
     const exQ = sqlSelect(StaffBranchAssignmentTable)
       .select([
@@ -512,7 +480,7 @@ export class AssignStaffBranchAccessHandler
       .whereEq(aCols.branchId, params.branchId)
       .activeOnly()
       .compile();
-    const existing = (await this.pool.query<typeof exQ._result>(exQ.text, exQ.params)).rows[0];
+    const existing = await tx.queryOne(exQ);
 
     if (existing) {
       const upd = sqlUpdate(StaffBranchAssignmentTable)
@@ -524,7 +492,7 @@ export class AssignStaffBranchAccessHandler
         .whereEq(aCols.id, existing.id)
         .whereNull(aCols.deletedAt)
         .compile();
-      await this.pool.query(upd.text, upd.params);
+      await tx.execute(upd);
       return;
     }
 
@@ -538,10 +506,8 @@ export class AssignStaffBranchAccessHandler
         updatedBy: this.request.actorId,
       })
       .compile();
-    await this.pool.query(ins.text, ins.params);
+    await tx.execute(ins);
   }
-
-  // FILE: apps/backend/src/iam/application/role-commands.ts (AssignStaffBranchAccessHandler.execute)
   async execute(cmd: AssignStaffBranchAccessCommand): Promise<Result<void>> {
     const sCols = RestaurantStaffTable.cols;
     const sQ = sqlSelect(RestaurantStaffTable)
@@ -552,7 +518,7 @@ export class AssignStaffBranchAccessHandler
       .whereEq(sCols.id, cmd.staffId)
       .activeOnly()
       .compile();
-    const staff = (await this.pool.query<typeof sQ._result>(sQ.text, sQ.params)).rows[0];
+    const staff = await this.uow.queryOne(sQ);
     if (!staff)
       return err(new DomainError('STAFF_NOT_FOUND', `Staff member ${cmd.staffId} not found.`, 404));
 
@@ -571,7 +537,7 @@ export class AssignStaffBranchAccessHandler
       .whereEq(bCols.restaurantId, staff.restaurantId)
       .activeOnly()
       .compile();
-    const targetBranch = (await this.pool.query<typeof bQ._result>(bQ.text, bQ.params)).rows[0];
+    const targetBranch = await this.uow.queryOne(bQ);
     if (!targetBranch)
       return err(
         new DomainError(
@@ -591,7 +557,7 @@ export class AssignStaffBranchAccessHandler
       .whereEq(rCols.id, cmd.roleId)
       .activeOnly()
       .compile();
-    const targetRole = (await this.pool.query<typeof rQ._result>(rQ.text, rQ.params)).rows[0];
+    const targetRole = await this.uow.queryOne(rQ);
     if (targetRole?.restaurantId !== staff.restaurantId) {
       return err(
         new DomainError('ROLE_NOT_FOUND', 'Target role does not exist in this brand.', 404),
@@ -611,24 +577,30 @@ export class AssignStaffBranchAccessHandler
     ]);
     if (!delegateCheck.ok) return delegateCheck;
 
-    await this.upsertAssignment({
-      staffId: staff.id,
-      branchId: cmd.branchId,
-      roleId: targetRole.id,
-      isPrimary: cmd.isPrimary,
-    });
-    await this.replaceStaffDirectRules(staff.id, cmd.branchId, normalizedRules);
+    // 3. In `AssignStaffBranchAccessHandler.execute` (bottom of method), wrap the 3 writes in `this.uow.transaction`:
+    await this.uow.transaction(async (tx) => {
+      await this.upsertAssignment(
+        {
+          staffId: staff.id,
+          branchId: cmd.branchId,
+          roleId: targetRole.id,
+          isPrimary: cmd.isPrimary,
+        },
+        tx,
+      );
+      await this.replaceStaffDirectRules(staff.id, cmd.branchId, normalizedRules, tx);
 
-    const updateStaff = sqlUpdate(RestaurantStaffTable)
-      .set({
-        roleId: targetRole.id,
-        role: mapRoleNameToLegacyEnum(targetRole.name),
-      })
-      .withAuditBump(this.request.actorId)
-      .whereEq(sCols.id, staff.id)
-      .whereNull(sCols.deletedAt)
-      .compile();
-    await this.pool.query(updateStaff.text, updateStaff.params);
+      const updateStaff = sqlUpdate(RestaurantStaffTable)
+        .set({
+          roleId: targetRole.id,
+          role: mapRoleNameToLegacyEnum(targetRole.name),
+        })
+        .withAuditBump(this.request.actorId)
+        .whereEq(sCols.id, staff.id)
+        .whereNull(sCols.deletedAt)
+        .compile();
+      await tx.execute(updateStaff);
+    });
 
     await this.rolePermissionCache.invalidateStaffBranch(staff.id, cmd.branchId);
     return ok(undefined);

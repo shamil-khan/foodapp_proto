@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/app.ts
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import { Scalar } from '@scalar/hono-api-reference';
 import { billingRoutes } from '@/billing/services/billing-routes';

@@ -1,9 +1,10 @@
 import {
+  type DbExecutor,
   LoyaltyLedgerTable,
   LoyaltyProgramPolicyTable,
-  type Pool,
   sqlSelect,
   sqlUpdate,
+  type UnitOfWork,
 } from '@foodapp/db';
 import type Decimal from 'decimal.js';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
@@ -27,63 +28,84 @@ import type { LoyaltyRepository } from '@/loyalty/infrastructure/loyalty-reposit
 const DAY_MS = 86_400_000;
 
 export class LoyaltySettlementService implements LoyaltySettlementPort {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly repo: LoyaltyRepository;
   private readonly clock: ClockPort;
 
-  constructor(pool: Pool, repo: LoyaltyRepository, clock: ClockPort) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, repo: LoyaltyRepository, clock: ClockPort) {
+    this.uow = uow;
     this.repo = repo;
     this.clock = clock;
+  }
+
+  private runInTx<T>(
+    externalTx: DbExecutor | undefined,
+    work: (tx: DbExecutor) => Promise<T>,
+  ): Promise<T> {
+    return externalTx ? work(externalTx) : this.uow.transaction(work);
   }
 
   async holdCheckoutPoints(
     input: HoldCheckoutPointsInput,
     actorId: string,
+    externalTx?: DbExecutor,
   ): Promise<Result<HeldPointsQuote>> {
     const issuerMerchantId = input.issuerScope === 'MERCHANT' ? input.restaurantId : null;
     const policy = await this.repo.getProgramPolicy(input.issuerScope, issuerMerchantId);
-    const state = await this.repo.loadWalletState({
-      holderType: 'CUSTOMER',
-      holderId: input.userId,
-      issuerScope: input.issuerScope,
-      issuerMerchantId,
-    });
 
-    const wallet = LoyaltyWalletAggregate.fromSnapshot(input.userId, state);
-    const holdRes = wallet.holdForCheckout(
-      {
-        orderId: input.orderId,
-        pointsToHold: input.pointsToHold,
-        programStatus: policy.status,
-        allowLoyaltyRedeem: input.allowLoyaltyRedeem,
-      },
-      {
-        actorId,
-        restaurantId: input.restaurantId,
-      },
-    );
-    if (!holdRes.ok) return holdRes;
+    return await this.runInTx(externalTx, async (tx) => {
+      await tx.executeRaw(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+        `loyalty:CUSTOMER:${input.userId}:${input.issuerScope}:${issuerMerchantId ?? 'PLATFORM'}`,
+      ]);
 
-    await this.repo.appendEntry({
-      userId: input.userId,
-      holderType: 'CUSTOMER',
-      holderId: input.userId,
-      orderId: input.orderId,
-      issuerScope: input.issuerScope,
-      issuerMerchantId,
-      txType: 'HELD',
-      sourceType: 'ORDER_REDEEM_HOLD',
-      status: 'HELD',
-      pointsDelta: -Math.abs(input.pointsToHold),
-      actorId,
-    });
+      const state = await this.repo.loadWalletState(
+        {
+          holderType: 'CUSTOMER',
+          holderId: input.userId,
+          issuerScope: input.issuerScope,
+          issuerMerchantId,
+        },
+        tx,
+      );
 
-    const discountGbp = roundGbp(policy.gbpPerPoint.mul(input.pointsToHold));
-    return ok({
-      pointsHeld: input.pointsToHold,
-      discountGbp,
-      issuerScope: input.issuerScope,
+      const wallet = LoyaltyWalletAggregate.fromSnapshot(input.userId, state);
+      const holdRes = wallet.holdForCheckout(
+        {
+          orderId: input.orderId,
+          pointsToHold: input.pointsToHold,
+          programStatus: policy.status,
+          allowLoyaltyRedeem: input.allowLoyaltyRedeem,
+        },
+        {
+          actorId,
+          restaurantId: input.restaurantId,
+        },
+      );
+      if (!holdRes.ok) return holdRes;
+
+      await this.repo.appendEntry(
+        {
+          userId: input.userId,
+          holderType: 'CUSTOMER',
+          holderId: input.userId,
+          orderId: input.orderId,
+          issuerScope: input.issuerScope,
+          issuerMerchantId,
+          txType: 'HELD',
+          sourceType: 'ORDER_REDEEM_HOLD',
+          status: 'HELD',
+          pointsDelta: -Math.abs(input.pointsToHold),
+          actorId,
+        },
+        tx,
+      );
+
+      const discountGbp = roundGbp(policy.gbpPerPoint.mul(input.pointsToHold));
+      return ok({
+        pointsHeld: input.pointsToHold,
+        discountGbp,
+        issuerScope: input.issuerScope,
+      });
     });
   }
 
@@ -92,41 +114,49 @@ export class LoyaltySettlementService implements LoyaltySettlementPort {
     userId: string,
     reason: string,
     actorId: string,
+    externalTx?: DbExecutor,
   ): Promise<void> {
     const lCols = LoyaltyLedgerTable.cols;
-    const q = sqlSelect(LoyaltyLedgerTable)
-      .select([
-        lCols.id,
-        lCols.pointsDelta,
-        lCols.issuerScope,
-        lCols.issuerMerchantId,
-      ])
-      .whereEq(lCols.orderId, orderId)
-      .whereEq(lCols.holderId, userId)
-      .whereEq(lCols.status, 'HELD')
-      .activeOnly()
-      .compile();
 
-    const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
-    for (const row of rows) {
-      await this.repo.updateEntryStatus(row.id, 'RELEASED', actorId, reason);
-      await this.repo.appendEntry({
-        userId,
-        holderType: 'CUSTOMER',
-        holderId: userId,
-        orderId,
-        issuerScope: row.issuerScope as LoyaltyIssuerScope,
-        issuerMerchantId: row.issuerMerchantId,
-        txType: 'RELEASED',
-        sourceType: 'ORDER_HOLD_RELEASE',
-        status: 'RELEASED',
-        pointsDelta: Math.abs(row.pointsDelta),
-        referenceEntryId: row.id,
-        auditReason: reason,
-        actorId,
-      });
-    }
+    await this.runInTx(externalTx, async (tx) => {
+      const q = sqlSelect(LoyaltyLedgerTable)
+        .select([
+          lCols.id,
+          lCols.pointsDelta,
+          lCols.issuerScope,
+          lCols.issuerMerchantId,
+        ])
+        .whereEq(lCols.orderId, orderId)
+        .whereEq(lCols.holderId, userId)
+        .whereEq(lCols.status, 'HELD')
+        .activeOnly()
+        .compile();
+
+      const rows = await tx.queryMany(q);
+      for (const row of rows) {
+        await this.repo.updateEntryStatus(row.id, 'RELEASED', actorId, reason, tx);
+        await this.repo.appendEntry(
+          {
+            userId,
+            holderType: 'CUSTOMER',
+            holderId: userId,
+            orderId,
+            issuerScope: row.issuerScope as LoyaltyIssuerScope,
+            issuerMerchantId: row.issuerMerchantId,
+            txType: 'RELEASED',
+            sourceType: 'ORDER_HOLD_RELEASE',
+            status: 'RELEASED',
+            pointsDelta: Math.abs(row.pointsDelta),
+            referenceEntryId: row.id,
+            auditReason: reason,
+            actorId,
+          },
+          tx,
+        );
+      }
+    });
   }
+
   async settleOrderLoyalty(params: {
     readonly orderId: string;
     readonly userId: string;
@@ -134,50 +164,55 @@ export class LoyaltySettlementService implements LoyaltySettlementPort {
     readonly netFoodSubtotalGbp: Decimal;
     readonly allowLoyaltyEarn: boolean;
     readonly actorId: string;
+    readonly tx?: DbExecutor;
   }): Promise<void> {
-    const lCols = LoyaltyLedgerTable.cols;
-    const holdQ = sqlSelect(LoyaltyLedgerTable)
-      .select([
-        lCols.id,
-        lCols.pointsDelta,
-        lCols.issuerScope,
-        lCols.issuerMerchantId,
-      ])
-      .whereEq(lCols.orderId, params.orderId)
-      .whereEq(lCols.holderId, params.userId)
-      .whereEq(lCols.status, 'HELD')
-      .activeOnly()
-      .compile();
-    const { rows: holds } = await this.pool.query<typeof holdQ._result>(holdQ.text, holdQ.params);
-    for (const hold of holds) {
-      await this.repo.updateEntryStatus(hold.id, 'REDEEMED', params.actorId);
-    }
+    const policy = params.allowLoyaltyEarn
+      ? await this.repo.getProgramPolicy('PLATFORM', null)
+      : null;
 
-    if (!params.allowLoyaltyEarn || params.netFoodSubtotalGbp.lte(0)) return;
+    await this.runInTx(params.tx, async (tx) => {
+      const lCols = LoyaltyLedgerTable.cols;
+      const holdQ = sqlSelect(LoyaltyLedgerTable)
+        .select([
+          lCols.id,
+        ])
+        .whereEq(lCols.orderId, params.orderId)
+        .whereEq(lCols.holderId, params.userId)
+        .whereEq(lCols.status, 'HELD')
+        .activeOnly()
+        .compile();
+      const holds = await tx.queryMany(holdQ);
+      for (const hold of holds) {
+        await this.repo.updateEntryStatus(hold.id, 'REDEEMED', params.actorId, undefined, tx);
+      }
 
-    const policy = await this.repo.getProgramPolicy('PLATFORM', null);
-    if (policy.status === 'FROZEN') return;
+      if (!policy || !params.allowLoyaltyEarn || params.netFoodSubtotalGbp.lte(0)) return;
+      if (policy.status === 'FROZEN') return;
 
-    const pointsEarned = policy.pointsPerGbp.mul(params.netFoodSubtotalGbp).floor().toNumber();
-    if (pointsEarned <= 0) return;
+      const pointsEarned = policy.pointsPerGbp.mul(params.netFoodSubtotalGbp).floor().toNumber();
+      if (pointsEarned <= 0) return;
 
-    const now = this.clock.now();
-    const maturesAt = new Date(now.getTime() + policy.maturationDays * DAY_MS);
-    const expiresAt = new Date(maturesAt.getTime() + policy.expiryDays * DAY_MS);
+      const now = this.clock.now();
+      const maturesAt = new Date(now.getTime() + policy.maturationDays * DAY_MS);
+      const expiresAt = new Date(maturesAt.getTime() + policy.expiryDays * DAY_MS);
 
-    await this.repo.appendEntry({
-      userId: params.userId,
-      holderType: 'CUSTOMER',
-      holderId: params.userId,
-      orderId: params.orderId,
-      issuerScope: 'PLATFORM',
-      txType: 'EARNED',
-      sourceType: 'ORDER_EARN',
-      status: 'PENDING_MATURATION',
-      pointsDelta: pointsEarned,
-      maturesAt,
-      expiresAt,
-      actorId: params.actorId,
+      await this.repo.appendEntry(
+        {
+          userId: params.userId,
+          holderType: 'CUSTOMER',
+          holderId: params.userId,
+          orderId: params.orderId,
+          issuerScope: 'PLATFORM',
+          txType: 'EARNED',
+          sourceType: 'ORDER_EARN',
+          status: 'PENDING_MATURATION',
+          pointsDelta: pointsEarned,
+          maturesAt,
+          expiresAt,
+          actorId: params.actorId,
+        },
+        tx,
+      );
     });
   }
 
@@ -186,6 +221,7 @@ export class LoyaltySettlementService implements LoyaltySettlementPort {
     readonly settlementId: string;
     readonly maxOffsetGbp: Decimal;
     readonly actorId: string;
+    readonly tx?: DbExecutor;
   }): Promise<{
     readonly pointsRedeemed: number;
     readonly offsetGbp: Decimal;
@@ -197,43 +233,54 @@ export class LoyaltySettlementService implements LoyaltySettlementPort {
         offsetGbp: roundGbp(0),
       };
     }
-    const wallet = await this.repo.loadWalletState({
-      holderType: 'MERCHANT',
-      holderId: params.restaurantId,
-      issuerScope: 'PLATFORM',
-      issuerMerchantId: null,
-    });
-    if (wallet.availablePoints <= 0) {
+    return await this.runInTx(params.tx, async (tx) => {
+      await tx.executeRaw(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+        `loyalty:MERCHANT:${params.restaurantId}:PLATFORM:PLATFORM`,
+      ]);
+      const wallet = await this.repo.loadWalletState(
+        {
+          holderType: 'MERCHANT',
+          holderId: params.restaurantId,
+          issuerScope: 'PLATFORM',
+          issuerMerchantId: null,
+        },
+        tx,
+      );
+      if (wallet.availablePoints <= 0) {
+        return {
+          pointsRedeemed: 0,
+          offsetGbp: roundGbp(0),
+        };
+      }
+      const maxPointsNeeded = params.maxOffsetGbp.div(policy.gbpPerPoint).floor().toNumber();
+      const pointsToRedeem = Math.min(wallet.availablePoints, maxPointsNeeded);
+      if (pointsToRedeem <= 0) {
+        return {
+          pointsRedeemed: 0,
+          offsetGbp: roundGbp(0),
+        };
+      }
+      const offsetGbp = roundGbp(policy.gbpPerPoint.mul(pointsToRedeem));
+      await this.repo.appendEntry(
+        {
+          userId: params.actorId,
+          holderType: 'MERCHANT',
+          holderId: params.restaurantId,
+          issuerScope: 'PLATFORM',
+          txType: 'REDEEMED',
+          sourceType: 'B2B_SETTLEMENT_OFFSET',
+          status: 'REDEEMED',
+          pointsDelta: -pointsToRedeem,
+          auditReason: `Applied to MerchantSettlement ${params.settlementId}`,
+          actorId: params.actorId,
+        },
+        tx,
+      );
       return {
-        pointsRedeemed: 0,
-        offsetGbp: roundGbp(0),
+        pointsRedeemed: pointsToRedeem,
+        offsetGbp,
       };
-    }
-    const maxPointsNeeded = params.maxOffsetGbp.div(policy.gbpPerPoint).floor().toNumber();
-    const pointsToRedeem = Math.min(wallet.availablePoints, maxPointsNeeded);
-    if (pointsToRedeem <= 0) {
-      return {
-        pointsRedeemed: 0,
-        offsetGbp: roundGbp(0),
-      };
-    }
-    const offsetGbp = roundGbp(policy.gbpPerPoint.mul(pointsToRedeem));
-    await this.repo.appendEntry({
-      userId: params.actorId,
-      holderType: 'MERCHANT',
-      holderId: params.restaurantId,
-      issuerScope: 'PLATFORM',
-      txType: 'REDEEMED',
-      sourceType: 'B2B_SETTLEMENT_OFFSET',
-      status: 'REDEEMED',
-      pointsDelta: -pointsToRedeem,
-      auditReason: `Applied to MerchantSettlement ${params.settlementId}`,
-      actorId: params.actorId,
     });
-    return {
-      pointsRedeemed: pointsToRedeem,
-      offsetGbp,
-    };
   }
 }
 
@@ -248,12 +295,12 @@ export interface UpdateLoyaltyGovernanceCommand extends Command<Result<void>> {
 export class UpdateLoyaltyGovernanceHandler
   implements CommandHandler<UpdateLoyaltyGovernanceCommand, Result<void>>
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, authz: AuthorizationPolicy, request: RequestContext) {
+    this.uow = uow;
     this.authz = authz;
     this.request = request;
   }
@@ -277,7 +324,7 @@ export class UpdateLoyaltyGovernanceHandler
     }
 
     const pCols = LoyaltyProgramPolicyTable.cols;
-    const upd = sqlUpdate(LoyaltyProgramPolicyTable)
+    const builder = sqlUpdate(LoyaltyProgramPolicyTable)
       .set({
         status: cmd.status,
         freezeExpiry: cmd.freezeExpiry ?? cmd.status === 'FROZEN',
@@ -285,10 +332,15 @@ export class UpdateLoyaltyGovernanceHandler
       })
       .withAuditBump(this.request.actorId)
       .whereEq(pCols.issuerScope, cmd.issuerScope)
-      .whereNull(pCols.deletedAt)
-      .compile();
+      .whereNull(pCols.deletedAt);
 
-    await this.pool.query(upd.text, upd.params);
+    if (cmd.issuerScope === 'MERCHANT' && cmd.restaurantId) {
+      builder.whereEq(pCols.restaurantId, cmd.restaurantId);
+    } else {
+      builder.whereNull(pCols.restaurantId);
+    }
+
+    await this.uow.execute(builder.compile());
     return ok(undefined);
   }
 }
@@ -302,18 +354,18 @@ export interface AuditLoyaltyEntryCommand extends Command<Result<void>> {
 export class AuditLoyaltyEntryHandler
   implements CommandHandler<AuditLoyaltyEntryCommand, Result<void>>
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly repo: LoyaltyRepository;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
   constructor(
-    pool: Pool,
+    uow: UnitOfWork,
     repo: LoyaltyRepository,
     authz: AuthorizationPolicy,
     request: RequestContext,
   ) {
-    this.pool = pool;
+    this.uow = uow;
     this.repo = repo;
     this.authz = authz;
     this.request = request;
@@ -327,27 +379,32 @@ export class AuditLoyaltyEntryHandler
     }
     const lCols = LoyaltyLedgerTable.cols;
     const sel = sqlSelect(LoyaltyLedgerTable).whereEq(lCols.id, cmd.entryId).activeOnly().compile();
-    const row = (await this.pool.query<typeof sel._result>(sel.text, sel.params)).rows[0];
+    const row = await this.uow.queryOne(sel);
     if (!row) {
       return err(new DomainError('ENTRY_NOT_FOUND', 'Loyalty ledger entry not found.', 404));
     }
 
     if (cmd.action === 'REVOKE') {
-      await this.repo.updateEntryStatus(row.id, 'REVOKED', this.request.actorId, cmd.reason);
-      await this.repo.appendEntry({
-        userId: row.userId,
-        holderType: row.holderType as 'CUSTOMER' | 'MERCHANT',
-        holderId: row.holderId ?? row.userId,
-        orderId: row.orderId,
-        issuerScope: row.issuerScope as LoyaltyIssuerScope,
-        issuerMerchantId: row.issuerMerchantId,
-        txType: 'REVOKED',
-        sourceType: 'AUDIT_CLAWBACK',
-        status: 'REVOKED',
-        pointsDelta: -Math.abs(row.pointsDelta),
-        referenceEntryId: row.id,
-        auditReason: cmd.reason,
-        actorId: this.request.actorId,
+      await this.uow.transaction(async (tx) => {
+        await this.repo.updateEntryStatus(row.id, 'REVOKED', this.request.actorId, cmd.reason, tx);
+        await this.repo.appendEntry(
+          {
+            userId: row.userId,
+            holderType: row.holderType as 'CUSTOMER' | 'MERCHANT',
+            holderId: row.holderId ?? row.userId,
+            orderId: row.orderId,
+            issuerScope: row.issuerScope as LoyaltyIssuerScope,
+            issuerMerchantId: row.issuerMerchantId,
+            txType: 'REVOKED',
+            sourceType: 'AUDIT_CLAWBACK',
+            status: 'REVOKED',
+            pointsDelta: -Math.abs(row.pointsDelta),
+            referenceEntryId: row.id,
+            auditReason: cmd.reason,
+            actorId: this.request.actorId,
+          },
+          tx,
+        );
       });
       return ok(undefined);
     }

@@ -1,6 +1,5 @@
-// FILE: apps/backend/src/brand/application/brand-onboarding-saga.ts (Part 1 of 2)
 import * as crypto from 'node:crypto';
-import type { Pool } from '@foodapp/db';
+import { type DbExecutor, type UnitOfWork } from '@foodapp/db';
 import type {
   BrandCatalogInitializedPayload,
   BrandOnboardingCompensationPayload,
@@ -20,20 +19,15 @@ interface BrandOnboardingSagaState extends Record<string, unknown> {
   catalogInitialized: boolean;
 }
 
-/**
- * Coordinates cross-context brand onboarding across `brand`, `iam`, and `catalog`.
- * Guarantees all-or-nothing atomicity: any downstream step failure triggers reverse-order
- * hard-delete compensation so uncommitted tenant rows and UNIQUE handles/emails are purged.
- */
 export class BrandOnboardingSaga {
   private static readonly SAGA_TYPE = 'BrandOnboardingCoordinationSaga';
   private readonly log = new AppLogger('brand-onboarding-saga');
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly eventBus: EventBus;
   private readonly sagaRepo: PgSagaRepository;
 
-  constructor(pool: Pool, eventBus: EventBus, sagaRepo: PgSagaRepository) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, eventBus: EventBus, sagaRepo: PgSagaRepository) {
+    this.uow = uow;
     this.eventBus = eventBus;
     this.sagaRepo = sagaRepo;
   }
@@ -71,65 +65,60 @@ export class BrandOnboardingSaga {
       await this.compensateFailure(p, event.metadata.actorId, event.metadata.requestId);
     });
   }
-  // FILE: apps/backend/src/brand/application/brand-onboarding-saga.ts (Part 2 of 2)
+
   private async markStepDone(
     restaurantId: string,
     field: 'iamBootstrapped' | 'catalogInitialized',
     actorId: string,
   ): Promise<void> {
-    const saga = await this.sagaRepo.findOrCreate<BrandOnboardingSagaState>(
-      BrandOnboardingSaga.SAGA_TYPE,
-      restaurantId,
-      'AWAITING_IAM_AND_CATALOG_BOOTSTRAP',
-      {
+    // Wrap Saga read + optimistic-lock step advancement inside a single atomic local UnitOfWork
+    await this.uow.transaction(async (tx) => {
+      const saga = await this.sagaRepo.findOrCreate<BrandOnboardingSagaState>(
+        BrandOnboardingSaga.SAGA_TYPE,
         restaurantId,
-        branchId: '',
-        ownerStaffId: '',
-        iamBootstrapped: false,
-        catalogInitialized: false,
-      },
-      actorId,
-    );
-    if (saga.status === 'COMPLETED' || saga.status === 'FAILED') return;
-
-    const nextState: BrandOnboardingSagaState = {
-      ...saga.statePayload,
-      [field]: true,
-    };
-    const isComplete = nextState.iamBootstrapped && nextState.catalogInitialized;
-    await this.sagaRepo.advanceStep(
-      saga.id,
-      saga.rowVersion,
-      isComplete ? 'COMPLETED' : 'PARTIAL_BOOTSTRAP_DONE',
-      isComplete ? 'COMPLETED' : 'RUNNING',
-      nextState,
-      actorId,
-    );
+        'AWAITING_IAM_AND_CATALOG_BOOTSTRAP',
+        {
+          restaurantId,
+          branchId: '',
+          ownerStaffId: '',
+          iamBootstrapped: false,
+          catalogInitialized: false,
+        },
+        actorId,
+        tx,
+      );
+      if (saga.status === 'COMPLETED' || saga.status === 'FAILED') return;
+      const nextState: BrandOnboardingSagaState = {
+        ...saga.statePayload,
+        [field]: true,
+      };
+      const isComplete = nextState.iamBootstrapped && nextState.catalogInitialized;
+      await this.sagaRepo.advanceStep(
+        saga.id,
+        saga.rowVersion,
+        isComplete ? 'COMPLETED' : 'PARTIAL_BOOTSTRAP_DONE',
+        isComplete ? 'COMPLETED' : 'RUNNING',
+        nextState,
+        actorId,
+        null,
+        tx,
+      );
+    });
   }
 
-  private async purgeBrandTables(restaurantId: string): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(`DELETE FROM "PaymentConfig" WHERE "restaurantId" = $1`, [
-        restaurantId,
-      ]);
-      await client.query(`DELETE FROM "RestaurantLayout" WHERE "restaurantId" = $1`, [
-        restaurantId,
-      ]);
-      await client.query(`DELETE FROM "RestaurantBranch" WHERE "restaurantId" = $1`, [
-        restaurantId,
-      ]);
-      await client.query(`DELETE FROM "Restaurant" WHERE "id" = $1`, [
-        restaurantId,
-      ]);
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+  private async purgeBrandTables(tx: DbExecutor, restaurantId: string): Promise<void> {
+    await tx.executeRaw(`DELETE FROM "PaymentConfig" WHERE "restaurantId" = $1`, [
+      restaurantId,
+    ]);
+    await tx.executeRaw(`DELETE FROM "RestaurantLayout" WHERE "restaurantId" = $1`, [
+      restaurantId,
+    ]);
+    await tx.executeRaw(`DELETE FROM "RestaurantBranch" WHERE "restaurantId" = $1`, [
+      restaurantId,
+    ]);
+    await tx.executeRaw(`DELETE FROM "Restaurant" WHERE "id" = $1`, [
+      restaurantId,
+    ]);
   }
 
   private async compensateFailure(
@@ -151,6 +140,7 @@ export class BrandOnboardingSaga {
       actorId,
     );
 
+    // Notify IAM & Catalog contexts to purge their child records before deleting parent Restaurant rows
     await this.eventBus.publish([
       {
         eventId: crypto.randomUUID(),
@@ -173,17 +163,20 @@ export class BrandOnboardingSaga {
       },
     ]);
 
-    // FILE: apps/backend/src/brand/application/brand-onboarding-saga.ts (End of compensateFailure)
-    await this.purgeBrandTables(failed.restaurantId);
-    await this.sagaRepo.advanceStep(
-      saga.id,
-      saga.rowVersion,
-      'COMPENSATED',
-      'FAILED',
-      saga.statePayload,
-      actorId,
-      `${failed.failedStep}: ${failed.reason}`,
-    );
+    await this.uow.transaction(async (tx) => {
+      await this.purgeBrandTables(tx, failed.restaurantId);
+      await this.sagaRepo.advanceStep(
+        saga.id,
+        saga.rowVersion,
+        'COMPENSATED',
+        'FAILED',
+        saga.statePayload,
+        actorId,
+        `${failed.failedStep}: ${failed.reason}`,
+        tx,
+      );
+    });
+
     this.log.error`Rolled back brand onboarding for ${failed.restaurantId}: ${failed.reason}`;
   }
 }

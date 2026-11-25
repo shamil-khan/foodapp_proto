@@ -1,9 +1,7 @@
-// FILE: apps/backend/src/iam/infrastructure/role-permission-cache.ts (Part 1 of 2)
 import {
   ALL_PERMISSIONS,
   type Permission,
   type PermissionEffect,
-  type Pool,
   type redisClient,
   StaffBranchAssignmentTable,
   StaffDirectPermissionTable,
@@ -11,6 +9,7 @@ import {
   StaffRoleTable,
   sqlSelect,
 } from '@foodapp/db';
+import type { ReadRepository } from '@/core/infrastructure/read-repository';
 import {
   type DirectPermissionPolicyRule,
   evaluateEffectivePermissions,
@@ -22,11 +21,11 @@ const ALLOWED_PERMISSION_SET = new Set<string>(ALL_PERMISSIONS);
 
 export class RolePermissionCache {
   private static readonly TTL_SECONDS = 3600;
-  private readonly pool: Pool;
+  private readonly readRepo: ReadRepository;
   private readonly redis: RedisClientType;
 
-  constructor(pool: Pool, redis: RedisClientType) {
-    this.pool = pool;
+  constructor(readRepo: ReadRepository, redis: RedisClientType) {
+    this.readRepo = readRepo;
     this.redis = redis;
   }
 
@@ -62,11 +61,7 @@ export class RolePermissionCache {
       .activeOnly()
       .compile();
 
-    const roleRes = await this.pool.query<typeof roleCheck._result>(
-      roleCheck.text,
-      roleCheck.params,
-    );
-    if (!roleRes.rows[0]) {
+    if (!(await this.readRepo.exists(roleCheck))) {
       return [];
     }
 
@@ -79,10 +74,7 @@ export class RolePermissionCache {
       .activeOnly()
       .compile();
 
-    const { rows } = await this.pool.query<typeof permQuery._result>(
-      permQuery.text,
-      permQuery.params,
-    );
+    const rows = await this.readRepo.findMany(permQuery);
 
     const permissions = rows
       .map((r) => r.permission)
@@ -94,7 +86,7 @@ export class RolePermissionCache {
 
     return permissions;
   }
-  // FILE: apps/backend/src/iam/infrastructure/role-permission-cache.ts (Part 2 of 2)
+
   async getDirectRulesForStaffBranch(
     staffId: string,
     branchId: string,
@@ -120,10 +112,7 @@ export class RolePermissionCache {
       .activeOnly()
       .compile();
 
-    const { rows } = await this.pool.query<typeof rulesQuery._result>(
-      rulesQuery.text,
-      rulesQuery.params,
-    );
+    const rows = await this.readRepo.findMany(rulesQuery);
 
     const rules: DirectPermissionPolicyRule[] = rows.map((r) => ({
       permission: r.permission,
@@ -156,11 +145,7 @@ export class RolePermissionCache {
       .activeOnly()
       .compile();
 
-    const { rows } = await this.pool.query<typeof assignQuery._result>(
-      assignQuery.text,
-      assignQuery.params,
-    );
-    const assignment = rows[0];
+    const assignment = await this.readRepo.findOne(assignQuery);
     if (!assignment) {
       return [];
     }

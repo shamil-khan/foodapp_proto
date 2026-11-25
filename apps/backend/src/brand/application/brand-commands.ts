@@ -1,19 +1,18 @@
-// FILE: apps/backend/src/brand/application/brand-commands.ts (Part 1 of 5)
 import * as crypto from 'node:crypto';
 import {
+  type DbExecutor,
   type HomePickupPrivacyMode,
   type KitchenType,
   type MenuSelectionMode,
   type OperationalStatus,
   PaymentConfigTable,
-  type Pool,
-  type PoolClient,
   RestaurantBranchTable,
   RestaurantLayoutTable,
   RestaurantTable,
   sqlInsert,
   sqlSelect,
   sqlUpdate,
+  type UnitOfWork,
 } from '@foodapp/db';
 import type {
   BranchCreatedPayload,
@@ -85,7 +84,7 @@ export interface RegisterBrandCommand
   readonly ownerEmail: string;
   readonly ownerPassword: string;
 }
-// FILE: apps/backend/src/brand/application/brand-commands.ts (Part 2 of 5)
+
 export class RegisterBrandHandler
   implements
     CommandHandler<
@@ -100,18 +99,18 @@ export class RegisterBrandHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly eventBus: EventBus;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, eventBus: EventBus, request: RequestContext) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, eventBus: EventBus, request: RequestContext) {
+    this.uow = uow;
     this.eventBus = eventBus;
     this.request = request;
   }
 
   private async insertBrandAndBranch(
-    client: PoolClient,
+    tx: DbExecutor,
     cmd: RegisterBrandCommand,
     cleanHandle: string,
     cityKey: string,
@@ -137,8 +136,8 @@ export class RegisterBrandHandler
         rCols.id,
       ])
       .compile();
-    const restaurantId = (await client.query<typeof restIns._result>(restIns.text, restIns.params))
-      .rows[0]?.id;
+    const restaurantRow = await tx.queryOne(restIns);
+    const restaurantId = restaurantRow?.id;
     if (!restaurantId) throw new Error('Failed to insert Restaurant');
 
     const bCols = RestaurantBranchTable.cols;
@@ -170,17 +169,15 @@ export class RegisterBrandHandler
         bCols.id,
       ])
       .compile();
-    const branchId = (
-      await client.query<typeof branchIns._result>(branchIns.text, branchIns.params)
-    ).rows[0]?.id;
+    const branchRow = await tx.queryOne(branchIns);
+    const branchId = branchRow?.id;
     if (!branchId) throw new Error('Failed to insert RestaurantBranch');
     return {
       restaurantId,
       branchId,
     };
   }
-  // FILE: apps/backend/src/brand/application/brand-commands.ts (Part 3 of 5)
-  // FILE: apps/backend/src/brand/application/brand-commands.ts (Line 183)
+
   async execute(cmd: RegisterBrandCommand): Promise<
     Result<{
       restaurantId: string;
@@ -211,7 +208,7 @@ export class RegisterBrandHandler
       ])
       .whereEq(rCols.handle, cleanHandle)
       .compile();
-    if ((await this.pool.query<typeof dupQ._result>(dupQ.text, dupQ.params)).rows[0]) {
+    if (await this.uow.exists(dupQ)) {
       return err(
         new DomainError(
           'HANDLE_TAKEN',
@@ -225,26 +222,21 @@ export class RegisterBrandHandler
       kitchenType: cmd.kitchenType,
       isMultiBranchEnterprise: cmd.isMultiBranchEnterprise,
     });
-    const client = await this.pool.connect();
-    let restaurantId = '';
-    let branchId = '';
 
-    try {
-      await client.query('BEGIN');
+    // Atomically persist brand, initial branch, layout, and payment config inside a short-lived UnitOfWork
+    const { restaurantId, branchId } = await this.uow.transaction(async (tx) => {
       const created = await this.insertBrandAndBranch(
-        client,
+        tx,
         cmd,
         cleanHandle,
         cityKey,
         branchKey,
         plan,
       );
-      restaurantId = created.restaurantId;
-      branchId = created.branchId;
 
       const layoutQ = sqlInsert(RestaurantLayoutTable)
         .values({
-          restaurantId,
+          restaurantId: created.restaurantId,
           templateId:
             cmd.kitchenType === 'HOME_KITCHEN' ? 'home_creator_warm_v1' : 'uk_pos_modern_v1',
           primaryColor: '#1E293B',
@@ -252,28 +244,24 @@ export class RegisterBrandHandler
           updatedBy: this.request.actorId,
         })
         .compile();
-      await client.query(layoutQ.text, layoutQ.params);
+      await tx.execute(layoutQ);
 
       const payQ = sqlInsert(PaymentConfigTable)
         .values({
-          restaurantId,
+          restaurantId: created.restaurantId,
           routingPolicy: 'CENTRAL_ESCROW',
           createdBy: this.request.actorId,
           updatedBy: this.request.actorId,
         })
         .compile();
-      await client.query(payQ.text, payQ.params);
+      await tx.execute(payQ);
 
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+      return created;
+    });
 
     const ownerStaffId = crypto.randomUUID();
-    // BrandOnboardingSaga coordinates IAM owner/role bootstrap and Catalog policy bootstrap atomically
+
+    // Publish BrandRegistered strictly post-commit so IAM & Catalog onboarding subscribers read committed brand rows
     await this.eventBus.publish([
       {
         eventId: crypto.randomUUID(),
@@ -314,7 +302,7 @@ export class RegisterBrandHandler
     });
   }
 }
-// FILE: apps/backend/src/brand/application/brand-commands.ts (Part 4 of 5)
+
 export interface CreateBrandBranchCommand
   extends Command<
     Result<{
@@ -353,13 +341,18 @@ export class CreateBrandBranchHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly eventBus: EventBus;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, eventBus: EventBus, authz: AuthorizationPolicy, request: RequestContext) {
-    this.pool = pool;
+  constructor(
+    uow: UnitOfWork,
+    eventBus: EventBus,
+    authz: AuthorizationPolicy,
+    request: RequestContext,
+  ) {
+    this.uow = uow;
     this.eventBus = eventBus;
     this.authz = authz;
     this.request = request;
@@ -383,9 +376,8 @@ export class CreateBrandBranchHandler
       .whereEq(rCols.id, cmd.restaurantId)
       .activeOnly()
       .compile();
-    const brandName =
-      (await this.pool.query<typeof brandQ._result>(brandQ.text, brandQ.params)).rows[0]?.name ??
-      cmd.name.trim();
+    const brandRow = await this.uow.queryOne(brandQ);
+    const brandName = brandRow?.name ?? cmd.name.trim();
 
     const cityKey = slugifyKey(cmd.city);
     const branchKey = slugifyKey(cmd.branchKey ?? cmd.name);
@@ -403,8 +395,7 @@ export class CreateBrandBranchHandler
       .whereEq(bCols.branchKey, branchKey)
       .activeOnly()
       .compile();
-    const dupRes = await this.pool.query<typeof dup._result>(dup.text, dup.params);
-    if (dupRes.rows[0]) {
+    if (await this.uow.exists(dup)) {
       return err(
         new DomainError(
           'BRANCH_EXISTS',
@@ -413,7 +404,6 @@ export class CreateBrandBranchHandler
         ),
       );
     }
-
     const menuSelectionMode = cmd.menuSelectionMode ?? 'ALL_BRAND_ITEMS';
     const postcodeSector = cmd.postcodeSector.trim().toUpperCase();
     const ins = sqlInsert(RestaurantBranchTable)
@@ -444,11 +434,11 @@ export class CreateBrandBranchHandler
         bCols.id,
       ])
       .compile();
-    const res = await this.pool.query<typeof ins._result>(ins.text, ins.params);
-    const branchId = res.rows[0]?.id;
+    const inserted = await this.uow.queryOne(ins);
+    const branchId = inserted?.id;
     if (!branchId) throw new Error('Failed to create branch');
 
-    // Sync branch metadata into catalog's read-model projection via domain event
+    // Emit BranchCreated post-commit so Catalog context syncs BranchCatalogProjection & MenuSnapshot
     await this.eventBus.publish([
       {
         eventId: crypto.randomUUID(),
@@ -480,7 +470,7 @@ export class CreateBrandBranchHandler
     });
   }
 }
-// FILE: apps/backend/src/brand/application/brand-commands.ts (Part 5 of 5)
+
 export interface UpdateBranchOperationalStatusCommand
   extends Command<
     Result<{
@@ -503,18 +493,18 @@ export class UpdateBranchOperationalStatusHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly statusCache: BranchStatusCache;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
   constructor(
-    pool: Pool,
+    uow: UnitOfWork,
     statusCache: BranchStatusCache,
     authz: AuthorizationPolicy,
     request: RequestContext,
   ) {
-    this.pool = pool;
+    this.uow = uow;
     this.statusCache = statusCache;
     this.authz = authz;
     this.request = request;
@@ -543,13 +533,13 @@ export class UpdateBranchOperationalStatusHandler
       .whereEq(bCols.id, cmd.branchId)
       .activeOnly()
       .compile();
-    const res = await this.pool.query<typeof lookup._result>(lookup.text, lookup.params);
-    const branch = res.rows[0];
+    const branch = await this.uow.queryOne(lookup);
     if (!branch) {
       return err(new DomainError('BRANCH_NOT_FOUND', 'Branch not found.', 404));
     }
 
     const now = new Date();
+    // Enforce 60-minute BUSY_PAUSED cooldown for branch managers; platform support admins bypass lock
     if (
       !this.authz.isPlatformAdmin() &&
       branch.operationalStatus === 'BUSY_PAUSED' &&
@@ -577,7 +567,7 @@ export class UpdateBranchOperationalStatusHandler
       .whereEq(bCols.id, cmd.branchId)
       .whereNull(bCols.deletedAt)
       .compile();
-    await this.pool.query(upd.text, upd.params);
+    await this.uow.execute(upd);
 
     const lockedUntilIso = lockedUntil ? lockedUntil.toISOString() : null;
     await this.statusCache.setStatus({
@@ -611,13 +601,18 @@ export interface UpdateBranchSettingsCommand extends Command<Result<void>> {
 export class UpdateBranchSettingsHandler
   implements CommandHandler<UpdateBranchSettingsCommand, Result<void>>
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly eventBus: EventBus;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, eventBus: EventBus, authz: AuthorizationPolicy, request: RequestContext) {
-    this.pool = pool;
+  constructor(
+    uow: UnitOfWork,
+    eventBus: EventBus,
+    authz: AuthorizationPolicy,
+    request: RequestContext,
+  ) {
+    this.uow = uow;
     this.eventBus = eventBus;
     this.authz = authz;
     this.request = request;
@@ -635,7 +630,7 @@ export class UpdateBranchSettingsHandler
       .whereEq(bCols.id, cmd.branchId)
       .activeOnly()
       .compile();
-    const branch = (await this.pool.query<typeof sel._result>(sel.text, sel.params)).rows[0];
+    const branch = await this.uow.queryOne(sel);
     if (!branch) {
       return err(new DomainError('BRANCH_NOT_FOUND', 'Branch not found.', 404));
     }
@@ -661,7 +656,7 @@ export class UpdateBranchSettingsHandler
       .whereNull(bCols.deletedAt)
       .compile();
 
-    await this.pool.query(upd.text, upd.params);
+    await this.uow.execute(upd);
 
     if (cmd.menuSelectionMode !== undefined) {
       await this.eventBus.publish([
@@ -698,12 +693,12 @@ export interface ReviewTakeawayWhitelistCommand extends Command<Result<void>> {
 export class ReviewTakeawayWhitelistHandler
   implements CommandHandler<ReviewTakeawayWhitelistCommand, Result<void>>
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, authz: AuthorizationPolicy, request: RequestContext) {
+    this.uow = uow;
     this.authz = authz;
     this.request = request;
   }
@@ -721,8 +716,7 @@ export class ReviewTakeawayWhitelistHandler
       .whereEq(bCols.id, cmd.branchId)
       .activeOnly()
       .compile();
-    const res = await this.pool.query<typeof sel._result>(sel.text, sel.params);
-    const branch = res.rows[0];
+    const branch = await this.uow.queryOne(sel);
     if (!branch) {
       return err(new DomainError('BRANCH_NOT_FOUND', 'Branch not found.', 404));
     }
@@ -744,7 +738,7 @@ export class ReviewTakeawayWhitelistHandler
       .whereEq(bCols.id, cmd.branchId)
       .whereNull(bCols.deletedAt)
       .compile();
-    await this.pool.query(upd.text, upd.params);
+    await this.uow.execute(upd);
     return ok(undefined);
   }
 }

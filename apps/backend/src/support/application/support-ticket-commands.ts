@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/support/application/support-ticket-commands.ts
 import type { PlatformSupportScope } from '@foodapp/db';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';

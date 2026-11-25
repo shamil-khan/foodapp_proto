@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/billing/services/billing-routes.ts
 import { OpenAPIHono } from '@hono/zod-openapi';
 import {
   getRestaurantBillingRoute,

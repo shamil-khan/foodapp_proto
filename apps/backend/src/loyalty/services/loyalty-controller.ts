@@ -46,7 +46,6 @@ export class LoyaltyController {
     }
   }
 
-  // FILE: apps/backend/src/loyalty/services/loyalty-controller.ts (updateGovernance)
   async updateGovernance(c: Context<AppEnv>, body: Record<string, unknown>) {
     const authz = c.var.di.get('authz');
     if (body.issuerScope === 'MERCHANT' && authz.isPlatformAdmin()) {

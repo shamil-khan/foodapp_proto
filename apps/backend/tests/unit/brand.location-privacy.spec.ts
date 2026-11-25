@@ -1,4 +1,3 @@
-// FILE: apps/backend/tests/unit/brand.location-privacy.spec.ts
 import { describe, expect, it } from 'vitest';
 import {
   type BranchPrivacyInput,

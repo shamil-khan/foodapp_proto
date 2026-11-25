@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/brand/services/brand-routes.ts
 import { OpenAPIHono } from '@hono/zod-openapi';
 import {
   createBrandBranchRoute,

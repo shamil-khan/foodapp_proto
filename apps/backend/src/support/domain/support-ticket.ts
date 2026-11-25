@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/support/domain/support-ticket.ts
 import {
   PLATFORM_SUPPORT_SCOPES,
   type PlatformSupportScope,

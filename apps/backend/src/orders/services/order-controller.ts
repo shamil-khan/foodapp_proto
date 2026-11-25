@@ -236,9 +236,14 @@ export class OrderController {
       }
 
       let active = true;
-      stream.onAbort(() => {
+      const cleanup = () => {
         active = false;
-      });
+        this.eventBus.unsubscribe('OrderTransitioned', forwarder);
+        this.eventBus.unsubscribe('OrderSettled', forwarder);
+        this.eventBus.unsubscribe('OrderCancelledOrRejected', forwarder);
+      };
+
+      stream.onAbort(cleanup);
 
       const forwarder = async (event: {
         aggregateId: string;
@@ -264,7 +269,11 @@ export class OrderController {
       this.eventBus.subscribe('OrderSettled', forwarder);
       this.eventBus.subscribe('OrderCancelledOrRejected', forwarder);
 
-      await stream.sleep(1000);
+      try {
+        await stream.sleep(1000);
+      } finally {
+        cleanup();
+      }
     });
   }
 
@@ -274,12 +283,12 @@ export class OrderController {
       restaurantId?: string;
     },
   ) {
-    const restaurantId = query.restaurantId ?? this.request.restaurantId;
-    if (!restaurantId) {
+    const branchId = query.restaurantId ?? this.request.branchId;
+    if (!branchId) {
       return c.json(
         {
           code: 'MISSING_TENANT',
-          error: 'restaurantId is required',
+          error: 'branchId or restaurantId is required',
         },
         400,
       );
@@ -287,8 +296,9 @@ export class OrderController {
 
     try {
       const orders = await this.queryBus.ask<PosOrderSummaryDto[]>('GetRestaurantOrders', {
-        restaurantId,
+        restaurantId: branchId,
       });
+
       return c.json(
         {
           orders: orders.map((order) => ({

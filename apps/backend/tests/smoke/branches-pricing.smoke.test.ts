@@ -1,4 +1,3 @@
-// FILE: apps/backend/tests/smoke/branches-pricing.smoke.test.ts (Part 1 of 2)
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ApiTestClient, loginPosStaff } from '../helpers/api-client.js';
 
@@ -134,7 +133,7 @@ describe('POS Branches, Pricing Policies & Branch Menu Overrides', () => {
     );
     expect(whitelist.status).toBe(200);
   });
-  // FILE: apps/backend/tests/smoke/branches-pricing.smoke.test.ts (Part 2 of 2)
+
   it('creates branch menu item, updates PricingPolicy, applies override, and handles 404 review', async () => {
     const itemOk = await client.post<{
       menuItemId: string;

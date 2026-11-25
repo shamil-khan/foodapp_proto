@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/support/services/support-schemas.ts (Part 1 of 2)
 import { PLATFORM_SUPPORT_SCOPES } from '@foodapp/db';
 import { createRoute, z } from '@hono/zod-openapi';
 import {
@@ -44,8 +43,7 @@ export const ListSupportTicketsQuerySchema = z.object({
       },
     }),
 });
-// FILE: apps/backend/src/support/services/support-schemas.ts (Part 2 of 2)
-// FILE: apps/backend/src/support/services/support-schemas.ts (Part 2 of 3)
+
 export const createSupportTicketRoute = createRoute({
   method: 'post',
   path: '/',
@@ -199,7 +197,7 @@ export const listSupportTicketsRoute = createRoute({
     },
   },
 });
-// FILE: apps/backend/src/support/services/support-schemas.ts (Part 3 of 3)
+
 export const revokeSupportTicketRoute = createRoute({
   method: 'patch',
   path: '/{ticketId}/revoke',

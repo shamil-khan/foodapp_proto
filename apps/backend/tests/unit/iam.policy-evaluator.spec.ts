@@ -1,4 +1,3 @@
-// FILE: apps/backend/tests/unit/iam.policy-evaluator.spec.ts
 import { describe, expect, it } from 'vitest';
 import {
   AuthorizationPolicy,

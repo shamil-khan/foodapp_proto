@@ -4,9 +4,9 @@ import {
   ItemModifierTable,
   type KdsRoutingTarget,
   MenuItemTable,
-  type Pool,
   RestaurantBranchTable,
   sqlSelect,
+  type UnitOfWork,
 } from '@foodapp/db';
 import Decimal from 'decimal.js';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
@@ -62,18 +62,18 @@ export class SyncPosOrdersHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly orderRepo: OrderRepository;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
   constructor(
-    pool: Pool,
+    uow: UnitOfWork,
     orderRepo: OrderRepository,
     authz: AuthorizationPolicy,
     request: RequestContext,
   ) {
-    this.pool = pool;
+    this.uow = uow;
     this.orderRepo = orderRepo;
     this.authz = authz;
     this.request = request;
@@ -90,7 +90,7 @@ export class SyncPosOrdersHandler
 
     for (const item of items) {
       const mQ = sqlSelect(MenuItemTable).whereEq(mCols.id, item.menuItemId).activeOnly().compile();
-      const mRow = (await this.pool.query<typeof mQ._result>(mQ.text, mQ.params)).rows[0];
+      const mRow = await this.uow.queryOne(mQ);
       if (!mRow) {
         return err(
           new DomainError('ITEM_NOT_FOUND', `Menu item ${item.menuItemId} not found.`, 404),
@@ -104,7 +104,7 @@ export class SyncPosOrdersHandler
         .whereEq(cCols.id, mRow.categoryId)
         .activeOnly()
         .compile();
-      const cRow = (await this.pool.query<typeof cQ._result>(cQ.text, cQ.params)).rows[0];
+      const cRow = await this.uow.queryOne(cQ);
       if (cRow?.restaurantId !== restaurantId) {
         return err(
           new DomainError('TENANT_FORBIDDEN', 'Offline POS item belongs to another brand.', 403),
@@ -126,7 +126,7 @@ export class SyncPosOrdersHandler
           .whereIn(modCols.id, item.modifierIds)
           .activeOnly()
           .compile();
-        const modRows = (await this.pool.query<typeof modQ._result>(modQ.text, modQ.params)).rows;
+        const modRows = await this.uow.queryMany(modQ);
         for (const m of modRows) {
           mods.push({
             modifierId: m.id,
@@ -184,7 +184,7 @@ export class SyncPosOrdersHandler
       .whereEq(bCols.id, branchId)
       .activeOnly()
       .compile();
-    const branch = (await this.pool.query<typeof bQ._result>(bQ.text, bQ.params)).rows[0];
+    const branch = await this.uow.queryOne(bQ);
     if (!branch) return err(new DomainError('BRANCH_NOT_FOUND', 'Branch not found.', 404));
 
     const syncedAt = new Date();
@@ -195,6 +195,7 @@ export class SyncPosOrdersHandler
     }[] = [];
 
     for (const item of cmd.orders) {
+      // Idempotent per-receipt deduplication prevents double-posting on terminal retry
       const existingOrderId = await this.orderRepo.findByBranchIdempotencyKey(
         branchId,
         item.clientOrderId,

@@ -1,4 +1,11 @@
-import { type Pool, SagaStateTable, sqlInsert, sqlSelect, sqlUpdate } from '@foodapp/db';
+import {
+  type DbExecutor,
+  SagaStateTable,
+  sqlInsert,
+  sqlSelect,
+  sqlUpdate,
+  type UnitOfWork,
+} from '@foodapp/db';
 
 export type SagaStatus = 'RUNNING' | 'COMPLETED' | 'COMPENSATING' | 'FAILED';
 
@@ -14,10 +21,10 @@ export interface SagaRecord<TState = Record<string, unknown>> {
 }
 
 export class PgSagaRepository {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
 
-  constructor(pool: Pool) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork) {
+    this.uow = uow;
   }
 
   async findOrCreate<TState extends Record<string, unknown>>(
@@ -26,6 +33,7 @@ export class PgSagaRepository {
     initialStep: string,
     initialPayload: TState,
     actorId: string,
+    tx: DbExecutor = this.uow,
   ): Promise<SagaRecord<TState>> {
     const { cols } = SagaStateTable;
 
@@ -44,12 +52,7 @@ export class PgSagaRepository {
       .whereEq(cols.correlationId, correlationId)
       .compile();
 
-    const existing = await this.pool.query<typeof findQuery._result>(
-      findQuery.text,
-      findQuery.params,
-    );
-
-    const existingRow = existing.rows[0];
+    const existingRow = await tx.queryOne(findQuery);
     if (existingRow) {
       return existingRow as unknown as SagaRecord<TState>;
     }
@@ -76,12 +79,7 @@ export class PgSagaRepository {
       ])
       .compile();
 
-    const inserted = await this.pool.query<typeof insertQuery._result>(
-      insertQuery.text,
-      insertQuery.params,
-    );
-
-    const createdRow = inserted.rows[0];
+    const createdRow = await tx.queryOne(insertQuery);
     if (!createdRow) {
       throw new Error(`Failed to persist initial saga state for ${sagaType}:${correlationId}`);
     }
@@ -96,6 +94,7 @@ export class PgSagaRepository {
     statePayload: TState,
     actorId: string,
     lastError: string | null = null,
+    tx: DbExecutor = this.uow,
   ): Promise<boolean> {
     const { cols } = SagaStateTable;
 
@@ -111,7 +110,7 @@ export class PgSagaRepository {
       .whereEq(cols.rowVersion, expectedRowVersion)
       .compile();
 
-    const res = await this.pool.query(updateQuery.text, updateQuery.params);
-    return (res.rowCount ?? 0) === 1;
+    const rowCount = await tx.execute(updateQuery);
+    return rowCount === 1;
   }
 }

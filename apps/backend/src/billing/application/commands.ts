@@ -1,11 +1,14 @@
 import * as crypto from 'node:crypto';
 import {
+  type DbExecutor,
+  FinancialLedgerTable,
   MerchantSettlementTable,
   OrderTable,
-  type Pool,
+  RestaurantBranchTable,
   RestaurantTable,
   sqlSelect,
   sqlUpdate,
+  type UnitOfWork,
 } from '@foodapp/db';
 import Decimal from 'decimal.js';
 import type { PaymentGatewayPort } from '@/billing/application/payment-gateway-port';
@@ -20,17 +23,18 @@ import type { BillingRepository } from '@/billing/infrastructure/billing-reposit
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import type { EventBus } from '@/core/application/event-bus';
+import type { DomainEvent } from '@/core/domain/domain-event';
 import { formatGbp, money, roundGbp } from '@/core/domain/money';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
 
 export class BillingSettlementService {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly repo: BillingRepository;
   private readonly eventBus: EventBus;
   private readonly vatStrategy = new UkStandardVatStrategy();
 
-  constructor(pool: Pool, repo: BillingRepository, eventBus: EventBus) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, repo: BillingRepository, eventBus: EventBus) {
+    this.uow = uow;
     this.repo = repo;
     this.eventBus = eventBus;
   }
@@ -48,7 +52,10 @@ export class BillingSettlementService {
     readonly loyaltyDiscountGbp: Decimal;
     readonly allowLoyaltyEarn: boolean;
     readonly actorId: string;
-  }): Promise<Result<void>> {
+    readonly tx?: DbExecutor;
+    readonly deferPublish?: boolean;
+  }): Promise<Result<readonly DomainEvent<unknown>[]>> {
+    const exec = params.tx ?? this.uow;
     const rCols = RestaurantTable.cols;
     const rQ = sqlSelect(RestaurantTable)
       .select([
@@ -57,12 +64,12 @@ export class BillingSettlementService {
       .whereEq(rCols.id, params.restaurantId)
       .activeOnly()
       .compile();
-    const rRow = (await this.pool.query<typeof rQ._result>(rQ.text, rQ.params)).rows[0];
+    const rRow = await exec.queryOne(rQ);
     const commissionRate = new Decimal(rRow?.platformFeeRate ?? '15.00');
     const commissionNet = roundGbp(params.subtotalGbp.mul(commissionRate).div(100));
     const commissionVat = this.vatStrategy.calculateCommissionVat(commissionNet);
 
-    const state = await this.repo.loadRestaurantLedgerState(params.restaurantId);
+    const state = await this.repo.loadRestaurantLedgerState(params.restaurantId, exec);
     const ledger = FinancialLedgerAggregate.fromSnapshot(params.restaurantId, state);
     const rec = ledger.recordOrderSettlement(
       {
@@ -78,22 +85,34 @@ export class BillingSettlementService {
     if (!rec.ok) return rec;
 
     const events = ledger.pullDomainEvents();
-    for (const ev of events) {
-      if (ev.eventType === 'BillingSettlementRecorded') {
-        const p = ev.payload as BillingSettlementRecordedPayload;
-        await this.repo.appendJournalLines({
-          orderId: p.orderId,
-          branchId: p.branchId,
-          restaurantId: p.restaurantId,
-          lines: p.journalLines,
-          actorId: params.actorId,
-        });
+    const writeLines = async (workTx: DbExecutor): Promise<void> => {
+      for (const ev of events) {
+        if (ev.eventType === 'BillingSettlementRecorded') {
+          const p = ev.payload as BillingSettlementRecordedPayload;
+          await this.repo.appendJournalLines(
+            {
+              orderId: p.orderId,
+              branchId: p.branchId,
+              restaurantId: p.restaurantId,
+              lines: p.journalLines,
+              actorId: params.actorId,
+            },
+            workTx,
+          );
+        }
       }
-      await this.eventBus.publish([
-        ev,
-      ]);
+    };
+
+    if (params.tx) {
+      await writeLines(params.tx);
+    } else {
+      await this.uow.transaction(writeLines);
     }
-    return ok(undefined);
+
+    if (!params.deferPublish) {
+      await this.eventBus.publish(events);
+    }
+    return ok(events);
   }
 }
 
@@ -117,20 +136,20 @@ export class RefundOrderHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly repo: BillingRepository;
   private readonly gateway: PaymentGatewayPort;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
   constructor(
-    pool: Pool,
+    uow: UnitOfWork,
     repo: BillingRepository,
     gateway: PaymentGatewayPort,
     authz: AuthorizationPolicy,
     request: RequestContext,
   ) {
-    this.pool = pool;
+    this.uow = uow;
     this.repo = repo;
     this.gateway = gateway;
     this.authz = authz;
@@ -144,7 +163,7 @@ export class RefundOrderHandler
   > {
     const oCols = OrderTable.cols;
     const oQ = sqlSelect(OrderTable).whereEq(oCols.id, cmd.orderId).activeOnly().compile();
-    const order = (await this.pool.query<typeof oQ._result>(oQ.text, oQ.params)).rows[0];
+    const order = await this.uow.queryOne(oQ);
     if (!order) {
       return err(new DomainError('ORDER_NOT_FOUND', 'Order not found.', 404));
     }
@@ -158,40 +177,94 @@ export class RefundOrderHandler
       return err(new DomainError('INVALID_REFUND', 'Refund amount exceeds order total.', 400));
     }
 
-    const gwRes = await this.gateway.refundCharge({
-      providerReference: order.idempotencyKey ?? order.id,
-      amountGbp: refundAmt,
-      reason: cmd.reason,
-    });
-    if (gwRes.status === 'FAILED') {
-      return err(new DomainError('GATEWAY_REFUND_FAILED', 'Payment gateway rejected refund.', 502));
+    let restaurantId = this.request.restaurantId ?? this.request.supportGrant?.restaurantId ?? '';
+    if (!restaurantId) {
+      const bCols = RestaurantBranchTable.cols;
+      const bQ = sqlSelect(RestaurantBranchTable)
+        .select([
+          bCols.restaurantId,
+        ])
+        .whereEq(bCols.id, order.branchId)
+        .activeOnly()
+        .compile();
+      const branchRow = await this.uow.queryOne(bQ);
+      restaurantId = branchRow?.restaurantId ?? '';
     }
 
-    const restaurantId = this.request.restaurantId ?? '';
-    await this.repo.appendJournalLines({
-      orderId: order.id,
-      branchId: order.branchId,
-      restaurantId,
-      lines: [
-        {
-          accountCode: 'MERCHANT_PAYABLE',
-          side: 'DEBIT',
-          amountGbp: formatGbp(refundAmt),
-          description: `Refund debit for order ${order.id}: ${cmd.reason}`,
-        },
-        {
-          accountCode: 'PLATFORM_GATEWAY_CLEARING',
-          side: 'CREDIT',
-          amountGbp: formatGbp(refundAmt),
-          description: `Gateway refund credit (${gwRes.refundReference})`,
-        },
-      ],
-      actorId: this.request.actorId,
-    });
+    const fCols = FinancialLedgerTable.cols;
+    const prevRefundQ = sqlSelect(FinancialLedgerTable)
+      .select([
+        fCols.debitAmount,
+      ])
+      .whereEq(fCols.orderId, order.id)
+      .whereEq(fCols.accountCode, 'MERCHANT_PAYABLE')
+      .activeOnly()
+      .compile();
 
-    return ok({
-      refundReference: gwRes.refundReference,
-    });
+    try {
+      const outcome = await this.uow.transaction(async (tx) => {
+        await tx.executeRaw(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+          `refund:order:${order.id}`,
+        ]);
+
+        const prevRefundRows = await tx.queryMany(prevRefundQ);
+        const alreadyRefunded = prevRefundRows.reduce(
+          (acc, r) => acc.plus(new Decimal(r.debitAmount)),
+          new Decimal(0),
+        );
+        if (alreadyRefunded.plus(refundAmt).gt(grossTotal)) {
+          return null;
+        }
+
+        const gwRes = await this.gateway.refundCharge({
+          providerReference: order.idempotencyKey ?? order.id,
+          amountGbp: refundAmt,
+          reason: cmd.reason,
+        });
+        if (gwRes.status === 'FAILED') {
+          throw new DomainError('GATEWAY_REFUND_FAILED', 'Payment gateway rejected refund.', 502);
+        }
+
+        await this.repo.appendJournalLines(
+          {
+            orderId: order.id,
+            branchId: order.branchId,
+            restaurantId,
+            lines: [
+              {
+                accountCode: 'MERCHANT_PAYABLE',
+                side: 'DEBIT',
+                amountGbp: formatGbp(refundAmt),
+                description: `Refund debit for order ${order.id}: ${cmd.reason}`,
+              },
+              {
+                accountCode: 'PLATFORM_GATEWAY_CLEARING',
+                side: 'CREDIT',
+                amountGbp: formatGbp(refundAmt),
+                description: `Gateway refund credit (${gwRes.refundReference})`,
+              },
+            ],
+            actorId: this.request.actorId,
+          },
+          tx,
+        );
+
+        return {
+          refundReference: gwRes.refundReference,
+        };
+      });
+
+      if (!outcome) {
+        return err(
+          new DomainError('INVALID_REFUND', 'Cumulative refund amount exceeds order total.', 400),
+        );
+      }
+
+      return ok(outcome);
+    } catch (error) {
+      if (error instanceof DomainError) return err(error);
+      throw error;
+    }
   }
 }
 
@@ -217,20 +290,20 @@ export class SettleMerchantHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly repo: BillingRepository;
   private readonly eventBus: EventBus;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
   constructor(
-    pool: Pool,
+    uow: UnitOfWork,
     repo: BillingRepository,
     eventBus: EventBus,
     authz: AuthorizationPolicy,
     request: RequestContext,
   ) {
-    this.pool = pool;
+    this.uow = uow;
     this.repo = repo;
     this.eventBus = eventBus;
     this.authz = authz;
@@ -243,7 +316,6 @@ export class SettleMerchantHandler
       readonly netPayoutGbp: string;
     }>
   > {
-    // FILE: apps/backend/src/billing/application/commands.ts (SettleMerchantHandler.execute)
     const access = this.authz.assertRestaurantAccess(
       cmd.restaurantId,
       'ledger:read',
@@ -259,7 +331,7 @@ export class SettleMerchantHandler
       .whereEq(rCols.id, cmd.restaurantId)
       .activeOnly()
       .compile();
-    const rest = (await this.pool.query<typeof rQ._result>(rQ.text, rQ.params)).rows[0];
+    const rest = await this.uow.queryOne(rQ);
     if (!rest) {
       return err(new DomainError('RESTAURANT_NOT_FOUND', 'Merchant not found.', 404));
     }
@@ -279,14 +351,13 @@ export class SettleMerchantHandler
     if (grossOnline.isZero() && cashReceivable.isZero()) {
       return err(new DomainError('NOTHING_TO_SETTLE', 'No unsettled billing entries found.', 409));
     }
-
     const netPayout = roundGbp(grossOnline.minus(cashReceivable));
     const shouldRequestOffset = Boolean(cmd.applyLoyaltyOffset && cashReceivable.gt(0));
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const now = new Date();
-      const settlementId = await this.repo.createMerchantSettlement(
+    const now = new Date();
+
+    // Atomically create MerchantSettlement and bind all unsettled FinancialLedger rows
+    const settlementId = await this.uow.transaction(async (tx) => {
+      const createdId = await this.repo.createMerchantSettlement(
         {
           restaurantId: cmd.restaurantId,
           periodStart: new Date(now.getTime() - 7 * 86_400_000),
@@ -299,7 +370,7 @@ export class SettleMerchantHandler
           status: cmd.markPaidReference && !shouldRequestOffset ? 'PAID' : 'PENDING_PAYOUT',
           actorId: this.request.actorId,
         },
-        client,
+        tx,
       );
 
       if (cmd.markPaidReference && !shouldRequestOffset) {
@@ -310,46 +381,42 @@ export class SettleMerchantHandler
             paidAt: now,
           })
           .withAuditBump(this.request.actorId)
-          .whereEq(mCols.id, settlementId)
+          .whereEq(mCols.id, createdId)
           .compile();
-        await client.query(markPaid.text, markPaid.params);
+        await tx.execute(markPaid);
       }
 
-      await client.query('COMMIT');
+      return createdId;
+    });
 
-      if (shouldRequestOffset) {
-        await this.eventBus.publish([
-          {
-            eventId: crypto.randomUUID(),
-            aggregateId: settlementId,
-            aggregateType: 'MerchantSettlement',
-            eventType: 'MerchantLoyaltyOffsetRequested',
-            version: 1,
-            occurredAt: now,
-            payload: {
-              settlementId,
-              restaurantId: cmd.restaurantId,
-              maxOffsetGbp: formatGbp(cashReceivable),
-              markPaidReference: cmd.markPaidReference,
-            } satisfies MerchantLoyaltyOffsetRequestedPayload,
-            metadata: {
-              requestId: this.request.requestId,
-              actorId: this.request.actorId,
-              restaurantId: cmd.restaurantId,
-            },
+    // Publish loyalty fee offset request post-commit so Loyalty consumer sees committed settlement row
+    if (shouldRequestOffset) {
+      await this.eventBus.publish([
+        {
+          eventId: crypto.randomUUID(),
+          aggregateId: settlementId,
+          aggregateType: 'MerchantSettlement',
+          eventType: 'MerchantLoyaltyOffsetRequested',
+          version: 1,
+          occurredAt: now,
+          payload: {
+            settlementId,
+            restaurantId: cmd.restaurantId,
+            maxOffsetGbp: formatGbp(cashReceivable),
+            markPaidReference: cmd.markPaidReference,
+          } satisfies MerchantLoyaltyOffsetRequestedPayload,
+          metadata: {
+            requestId: this.request.requestId,
+            actorId: this.request.actorId,
+            restaurantId: cmd.restaurantId,
           },
-        ]);
-      }
-
-      return ok({
-        settlementId,
-        netPayoutGbp: formatGbp(netPayout),
-      });
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+        },
+      ]);
     }
+
+    return ok({
+      settlementId,
+      netPayoutGbp: formatGbp(netPayout),
+    });
   }
 }

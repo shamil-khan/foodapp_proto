@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/iam/infrastructure/better-auth.ts (Part 1 of 2)
 import { pgPool, redisClient } from '@foodapp/db';
 import { betterAuth } from 'better-auth';
 import { admin, bearer, phoneNumber } from 'better-auth/plugins';
@@ -59,7 +58,7 @@ export const auth = betterAuth({
       return await client.incrBy(`auth:${key}`, value);
     },
   },
-  // FILE: apps/backend/src/iam/infrastructure/better-auth.ts (Part 2 of 2)
+
   emailAndPassword: {
     enabled: true,
   },

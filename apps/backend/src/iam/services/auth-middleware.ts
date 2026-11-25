@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/iam/services/auth-middleware.ts (Part 1 of 3)
 import * as crypto from 'node:crypto';
 import {
   type Permission,
@@ -88,7 +87,7 @@ export const initDiScope = inferdiHono<
     });
   },
 });
-// FILE: apps/backend/src/iam/services/auth-middleware.ts (Part 2 of 3)
+
 export const requireGlobalUser = (allowedRoles?: readonly PlatformRole[]) =>
   createMiddleware<AppEnv>(async (c, next) => {
     const request = c.var.di.get('request');
@@ -203,8 +202,7 @@ export const requireAnyPermission = (...permissions: readonly Permission[]) =>
 
     await next();
   });
-// FILE: apps/backend/src/iam/services/auth-middleware.ts (Part 3 of 3)
-// FILE: apps/backend/src/iam/services/auth-middleware.ts (Part 3 of 3)
+
 type SupportTargetResolver = (c: {
   req: {
     param: (name: string) => string | undefined;

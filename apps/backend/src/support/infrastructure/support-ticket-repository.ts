@@ -1,13 +1,12 @@
-// FILE: apps/backend/src/support/infrastructure/support-ticket-repository.ts (Part 1 of 2)
 import {
   type PlatformSupportScope,
-  type Pool,
   SupportTicketAuditLogTable,
   type SupportTicketStatus,
   SupportTicketTable,
   sqlInsert,
   sqlSelect,
   sqlUpdate,
+  type UnitOfWork,
 } from '@foodapp/db';
 import type { ActiveSupportGrant, RequestContext } from '@/core/application/authorization';
 import { DomainError, err, type Result } from '@/core/domain/result';
@@ -42,11 +41,11 @@ function mapRowToTicketRecord(
 }
 
 export class SupportTicketRepository extends ScopedRepository implements SupportAccessPort {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
 
-  constructor(pool: Pool, request: RequestContext) {
+  constructor(uow: UnitOfWork, request: RequestContext) {
     super(request);
-    this.pool = pool;
+    this.uow = uow;
   }
 
   async createApprovedTicket(params: {
@@ -90,8 +89,8 @@ export class SupportTicketRepository extends ScopedRepository implements Support
       ])
       .compile();
 
-    const res = await this.pool.query<typeof ins._result>(ins.text, ins.params);
-    const id = res.rows[0]?.id;
+    const row = await this.uow.queryOne(ins);
+    const id = row?.id;
     if (!id) {
       throw new Error('Failed to create SupportTicket record');
     }
@@ -99,12 +98,11 @@ export class SupportTicketRepository extends ScopedRepository implements Support
       id,
     };
   }
-  // FILE: apps/backend/src/support/infrastructure/support-ticket-repository.ts (Part 2 of 2)
+
   async findTicketById(ticketId: string): Promise<SupportTicketRecord | null> {
     const tCols = SupportTicketTable.cols;
     const q = sqlSelect(SupportTicketTable).whereEq(tCols.id, ticketId).activeOnly().compile();
-    const res = await this.pool.query<typeof q._result>(q.text, q.params);
-    const row = res.rows[0];
+    const row = await this.uow.queryOne(q);
     return row
       ? mapRowToTicketRecord(
           row as unknown as typeof SupportTicketTable._row & Record<string, unknown>,
@@ -122,8 +120,8 @@ export class SupportTicketRepository extends ScopedRepository implements Support
       .orderBy(tCols.createdAt, 'DESC')
       .take(50)
       .compile();
-    const res = await this.pool.query<typeof q._result>(q.text, q.params);
-    return res.rows.map((r) =>
+    const rows = await this.uow.queryMany(q);
+    return rows.map((r) =>
       mapRowToTicketRecord(
         r as unknown as typeof SupportTicketTable._row & Record<string, unknown>,
       ),
@@ -142,7 +140,7 @@ export class SupportTicketRepository extends ScopedRepository implements Support
       .whereEq(tCols.id, ticketId)
       .whereNull(tCols.deletedAt)
       .compile();
-    await this.pool.query(upd.text, upd.params);
+    await this.uow.execute(upd);
   }
 
   /**
@@ -186,7 +184,7 @@ export class SupportTicketRepository extends ScopedRepository implements Support
         targetResourceId: input.targetResourceId ?? null,
       })
       .compile();
-    await this.pool.query(auditIns.text, auditIns.params);
+    await this.uow.execute(auditIns);
 
     return decision;
   }

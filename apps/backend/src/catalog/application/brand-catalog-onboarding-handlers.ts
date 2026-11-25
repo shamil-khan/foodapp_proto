@@ -1,11 +1,11 @@
-// FILE: apps/backend/src/catalog/application/brand-catalog-onboarding-handlers.ts (Part 1 of 2)
 import * as crypto from 'node:crypto';
 import {
   CatalogBranchProjectionTable,
-  type Pool,
+  type DbExecutor,
   PricingPolicyTable,
   ProcessedEventTable,
   sqlInsert,
+  type UnitOfWork,
 } from '@foodapp/db';
 import type { EventBus } from '@/core/application/event-bus';
 import { AppLogger } from '@/logger';
@@ -31,15 +31,15 @@ interface CompensationCatalogPayload {
  */
 export class BrandCatalogOnboardingHandler {
   private readonly log = new AppLogger('catalog-brand-onboarding');
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly eventBus: EventBus;
 
-  constructor(pool: Pool, eventBus: EventBus) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, eventBus: EventBus) {
+    this.uow = uow;
     this.eventBus = eventBus;
   }
 
-  private async claimEventOnce(eventId: string): Promise<boolean> {
+  private async claimEventOnce(eventId: string, tx: DbExecutor): Promise<boolean> {
     const pCols = ProcessedEventTable.cols;
     const ins = sqlInsert(ProcessedEventTable)
       .values({
@@ -54,58 +54,59 @@ export class BrandCatalogOnboardingHandler {
       ])
       .compile();
 
-    const res = await this.pool.query<typeof ins._result>(ins.text, ins.params);
-    return (res.rowCount ?? 0) === 1;
+    const row = await tx.queryOne(ins);
+    return Boolean(row);
   }
-  // FILE: apps/backend/src/catalog/application/brand-catalog-onboarding-handlers.ts (Part 2 of 2)
+
   private async purgeCatalogRecords(restaurantId: string, branchId: string): Promise<void> {
-    await this.pool.query(`DELETE FROM "CatalogBranchProjection" WHERE "branchId" = $1`, [
-      branchId,
-    ]);
-    await this.pool.query(`DELETE FROM "PricingPolicy" WHERE "restaurantId" = $1`, [
-      restaurantId,
-    ]);
+    await this.uow.transaction(async (tx) => {
+      await tx.executeRaw(`DELETE FROM "CatalogBranchProjection" WHERE "branchId" = $1`, [
+        branchId,
+      ]);
+      await tx.executeRaw(`DELETE FROM "PricingPolicy" WHERE "restaurantId" = $1`, [
+        restaurantId,
+      ]);
+    });
   }
 
   public register(eventBus: EventBus): void {
     eventBus.subscribe('BrandRegistered', async (event) => {
-      if (!(await this.claimEventOnce(event.eventId))) return;
       const p = event.payload as unknown as BrandRegisteredCatalogPayload;
 
-      const client = await this.pool.connect();
+      let committed = false;
       try {
-        await client.query('BEGIN');
+        committed = await this.uow.transaction(async (tx) => {
+          if (!(await this.claimEventOnce(event.eventId, tx))) return false;
 
-        const policyQ = sqlInsert(PricingPolicyTable)
-          .values({
-            restaurantId: p.restaurantId,
-            branchId: null,
-            menuPricingMode: p.isMultiBranchEnterprise ? 'THRESHOLD_HYBRID' : 'BRANCH_DIRECT',
-            maxDirectPriceDeltaPercent: p.isMultiBranchEnterprise ? '10.00' : '25.00',
-            allowBranchLocalItems: true,
-            createdBy: event.metadata.actorId,
-            updatedBy: event.metadata.actorId,
-          })
-          .compile();
-        await client.query(policyQ.text, policyQ.params);
+          const policyQ = sqlInsert(PricingPolicyTable)
+            .values({
+              restaurantId: p.restaurantId,
+              branchId: null,
+              menuPricingMode: p.isMultiBranchEnterprise ? 'THRESHOLD_HYBRID' : 'BRANCH_DIRECT',
+              maxDirectPriceDeltaPercent: p.isMultiBranchEnterprise ? '10.00' : '25.00',
+              allowBranchLocalItems: true,
+              createdBy: event.metadata.actorId,
+              updatedBy: event.metadata.actorId,
+            })
+            .compile();
+          await tx.execute(policyQ);
 
-        const projQ = sqlInsert(CatalogBranchProjectionTable)
-          .values({
-            branchId: p.branchId,
-            restaurantId: p.restaurantId,
-            brandName: p.brandName,
-            branchName: p.branchName,
-            postcodeSector: p.postcodeSector,
-            menuSelectionMode: 'ALL_BRAND_ITEMS',
-            createdBy: event.metadata.actorId,
-            updatedBy: event.metadata.actorId,
-          })
-          .compile();
-        await client.query(projQ.text, projQ.params);
-
-        await client.query('COMMIT');
+          const projQ = sqlInsert(CatalogBranchProjectionTable)
+            .values({
+              branchId: p.branchId,
+              restaurantId: p.restaurantId,
+              brandName: p.brandName,
+              branchName: p.branchName,
+              postcodeSector: p.postcodeSector,
+              menuSelectionMode: 'ALL_BRAND_ITEMS',
+              createdBy: event.metadata.actorId,
+              updatedBy: event.metadata.actorId,
+            })
+            .compile();
+          await tx.execute(projQ);
+          return true;
+        });
       } catch (error) {
-        await client.query('ROLLBACK');
         const reason = error instanceof Error ? error.message : 'Catalog onboarding failed';
         await this.eventBus.publish([
           {
@@ -126,9 +127,9 @@ export class BrandCatalogOnboardingHandler {
           },
         ]);
         return;
-      } finally {
-        client.release();
       }
+
+      if (!committed) return;
 
       await this.eventBus.publish([
         {

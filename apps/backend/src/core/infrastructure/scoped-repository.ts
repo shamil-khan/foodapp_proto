@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/core/infrastructure/scoped-repository.ts (Part 1 of 2)
 import type { RequestContext } from '@/core/application/authorization';
 import { DomainError } from '@/core/domain/result';
 
@@ -67,7 +66,7 @@ export class ScopedRepository {
       'Branch-scoped repository access requires POS staff or approved support ticket.',
     );
   }
-  // FILE: apps/backend/src/core/infrastructure/scoped-repository.ts (Part 2 of 2)
+
   protected resolveRestaurantScope(requestedRestaurantId?: string): TenantScopeFilter {
     if (this.request.actorSource === 'SYSTEM') {
       return {

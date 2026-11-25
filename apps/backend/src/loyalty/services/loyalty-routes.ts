@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/loyalty/services/loyalty-routes.ts
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@/container';
 import { openApiValidationHook } from '@/core/services/openapi-shared';

@@ -1,4 +1,3 @@
-// FILE: apps/backend/tests/smoke/brands-menus-onboarding.smoke.test.ts
 import { describe, expect, it } from 'vitest';
 import { ApiTestClient } from '../helpers/api-client.js';
 

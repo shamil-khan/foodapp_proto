@@ -2,20 +2,22 @@ import * as crypto from 'node:crypto';
 import {
   BranchMenuOverrideTable,
   CategoryTable,
+  type DbReader,
   ItemModifierTable,
   type KdsRoutingTarget,
   MenuItemTable,
   OrderTable,
-  type Pool,
   PromotionTable,
   RestaurantBranchTable,
   sqlSelect,
+  type UnitOfWork,
 } from '@foodapp/db';
 import Decimal from 'decimal.js';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
 import { formatGbp, money, roundGbp } from '@/core/domain/money';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
+import type { ReadRepository } from '@/core/infrastructure/read-repository';
 import type { CartLineInput, CartStorePort } from '@/orders/application/cart-service';
 import type { DeliveryProviderPort } from '@/orders/application/delivery-provider-port';
 import type { OrderPaymentPort } from '@/orders/application/payment-port';
@@ -50,10 +52,13 @@ interface BranchRuntimePolicy {
   readonly maxReceivableCreditLimitGbp: Decimal;
 }
 
-async function loadBranchPolicy(pool: Pool, branchId: string): Promise<BranchRuntimePolicy | null> {
+async function loadBranchPolicy(
+  db: DbReader,
+  branchId: string,
+): Promise<BranchRuntimePolicy | null> {
   const bCols = RestaurantBranchTable.cols;
   const q = sqlSelect(RestaurantBranchTable).whereEq(bCols.id, branchId).activeOnly().compile();
-  const row = (await pool.query<typeof q._result>(q.text, q.params)).rows[0];
+  const row = await db.queryOne(q);
   if (!row) return null;
 
   return {
@@ -118,7 +123,7 @@ function validateChannelCapability(
 }
 
 async function resolveItemModifiers(
-  pool: Pool,
+  db: DbReader,
   menuItemId: string,
   modifierIds?: readonly string[],
 ): Promise<
@@ -140,7 +145,7 @@ async function resolveItemModifiers(
     .whereEq(modCols.menuItemId, menuItemId)
     .activeOnly()
     .compile();
-  const modRows = (await pool.query<typeof modQ._result>(modQ.text, modQ.params)).rows;
+  const modRows = await db.queryMany(modQ);
   return modRows.map((m) => ({
     modifierId: m.id,
     name: m.name,
@@ -149,7 +154,7 @@ async function resolveItemModifiers(
 }
 
 async function hydrateSingleOrderLine(
-  pool: Pool,
+  db: DbReader,
   branch: BranchRuntimePolicy,
   item: CartLineInput,
   overrideMap: Map<
@@ -170,13 +175,12 @@ async function hydrateSingleOrderLine(
     .whereEq(mCols.isActive, true)
     .activeOnly()
     .compile();
-  const menuRow = (await pool.query<typeof mQ._result>(mQ.text, mQ.params)).rows[0];
+  const menuRow = await db.queryOne(mQ);
   if (!menuRow) {
     return err(
       new DomainError('ITEM_NOT_FOUND', `Menu item ${item.menuItemId} is unavailable.`, 404),
     );
   }
-
   const catQ = sqlSelect(CategoryTable)
     .select([
       cCols.restaurantId,
@@ -184,7 +188,7 @@ async function hydrateSingleOrderLine(
     .whereEq(cCols.id, menuRow.categoryId)
     .activeOnly()
     .compile();
-  const catRow = (await pool.query<typeof catQ._result>(catQ.text, catQ.params)).rows[0];
+  const catRow = await db.queryOne(catQ);
   if (catRow?.restaurantId !== branch.restaurantId) {
     return err(
       new DomainError(
@@ -217,7 +221,7 @@ async function hydrateSingleOrderLine(
   }
 
   const effectivePrice = new Decimal(ov?.priceOverride ?? menuRow.basePrice);
-  const resolvedMods = await resolveItemModifiers(pool, item.menuItemId, item.modifierIds);
+  const resolvedMods = await resolveItemModifiers(db, item.menuItemId, item.modifierIds);
 
   return ok({
     lineId: crypto.randomUUID(),
@@ -233,7 +237,7 @@ async function hydrateSingleOrderLine(
 }
 
 async function hydrateOrderLines(
-  pool: Pool,
+  db: DbReader,
   branch: BranchRuntimePolicy,
   items: readonly CartLineInput[],
 ): Promise<Result<HydratedCartLineInput[]>> {
@@ -248,8 +252,7 @@ async function hydrateOrderLines(
     .whereEq(oCols.branchId, branch.id)
     .activeOnly()
     .compile();
-  const overrides = (await pool.query<typeof overrideQ._result>(overrideQ.text, overrideQ.params))
-    .rows;
+  const overrides = await db.queryMany(overrideQ);
   const overrideMap = new Map(
     overrides.map((o) => [
       o.menuItemId,
@@ -259,7 +262,7 @@ async function hydrateOrderLines(
 
   const hydrated: HydratedCartLineInput[] = [];
   for (const item of items) {
-    const lineRes = await hydrateSingleOrderLine(pool, branch, item, overrideMap);
+    const lineRes = await hydrateSingleOrderLine(db, branch, item, overrideMap);
     if (!lineRes.ok) return lineRes;
     hydrated.push(lineRes.value);
   }
@@ -267,7 +270,7 @@ async function hydrateOrderLines(
 }
 
 async function evaluatePromoCode(params: {
-  readonly pool: Pool;
+  readonly db: DbReader;
   readonly restaurantId: string;
   readonly promoCode?: string;
   readonly grossSubtotal: Decimal;
@@ -292,7 +295,7 @@ async function evaluatePromoCode(params: {
     .whereEq(pCols.promoCode, params.promoCode.trim().toUpperCase())
     .activeOnly()
     .compile();
-  const promo = (await params.pool.query<typeof q._result>(q.text, q.params)).rows[0];
+  const promo = await params.db.queryOne(q);
   if (!promo) {
     return err(new DomainError('INVALID_PROMO', 'Promotion code not found.', 404));
   }
@@ -366,17 +369,22 @@ export class PreviewOrderHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly readRepo: ReadRepository;
 
-  constructor(pool: Pool) {
-    this.pool = pool;
+  constructor(readRepo: ReadRepository) {
+    this.readRepo = readRepo;
   }
 
   async execute(cmd: PreviewOrderCommand) {
-    const branch = await loadBranchPolicy(this.pool, cmd.branchId);
+    const dbReaderAdapter = {
+      queryOne: this.readRepo.findOne.bind(this.readRepo),
+      queryMany: this.readRepo.findMany.bind(this.readRepo),
+      exists: this.readRepo.exists.bind(this.readRepo),
+    };
+    const branch = await loadBranchPolicy(dbReaderAdapter, cmd.branchId);
     if (!branch) return err(new DomainError('BRANCH_NOT_FOUND', 'Branch not found.', 404));
 
-    const hydrated = await hydrateOrderLines(this.pool, branch, cmd.items);
+    const hydrated = await hydrateOrderLines(dbReaderAdapter, branch, cmd.items);
     if (!hydrated.ok) return hydrated;
 
     const grossFood = hydrated.value.reduce((acc, l) => {
@@ -385,7 +393,7 @@ export class PreviewOrderHandler
     }, new Decimal(0));
 
     const promoRes = await evaluatePromoCode({
-      pool: this.pool,
+      db: dbReaderAdapter,
       restaurantId: branch.restaurantId,
       promoCode: cmd.promoCode,
       grossSubtotal: grossFood,
@@ -446,20 +454,20 @@ export class CheckoutOrderHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly orderRepo: OrderRepository;
   private readonly cartStore: CartStorePort;
   private readonly gateway: OrderPaymentPort;
   private readonly request: RequestContext;
 
   constructor(
-    pool: Pool,
+    uow: UnitOfWork,
     orderRepo: OrderRepository,
     cartStore: CartStorePort,
     gateway: OrderPaymentPort,
     request: RequestContext,
   ) {
-    this.pool = pool;
+    this.uow = uow;
     this.orderRepo = orderRepo;
     this.cartStore = cartStore;
     this.gateway = gateway;
@@ -476,7 +484,7 @@ export class CheckoutOrderHandler
       .whereEq(oCols.branchId, branchId)
       .activeOnly()
       .compile();
-    const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
+    const rows = await this.uow.queryMany(q);
     return rows
       .filter((r) => r.paymentMethod === 'CASH' || r.paymentMethod === 'COD')
       .reduce((acc, r) => acc.plus(new Decimal(r.totalAmount)), new Decimal(0));
@@ -500,19 +508,6 @@ export class CheckoutOrderHandler
     return ok(undefined);
   }
 
-  private async resolveCheckoutLines(
-    branchId: string,
-    cmdItems?: readonly CartLineInput[],
-  ): Promise<Result<readonly CartLineInput[]>> {
-    if (cmdItems && cmdItems.length > 0) return ok(cmdItems);
-    const stored = await this.cartStore.getCart(this.request.actorId, branchId);
-    const lines = stored?.lines ?? [];
-    if (lines.length === 0) {
-      return err(new DomainError('EMPTY_CART', 'Cart is empty.', 400));
-    }
-    return ok(lines);
-  }
-
   private async captureOnlinePayment(
     order: OrderAggregate,
     cmd: CheckoutOrderCommand,
@@ -521,6 +516,7 @@ export class CheckoutOrderHandler
     if (cmd.paymentMode !== 'ONLINE_GATEWAY' || !money(order.snapshot.totalAmountGbp).gt(0)) {
       return ok(undefined);
     }
+    // Capture online gateway payment outside DB transaction so external I/O never holds locks
     const charge = await this.gateway.captureCharge({
       orderId: order.id,
       amountGbp: money(order.snapshot.totalAmountGbp),
@@ -554,6 +550,27 @@ export class CheckoutOrderHandler
     return ok(charge.providerReference);
   }
 
+  private async resolveCheckoutCart(
+    branchId: string,
+    cmdItems?: readonly CartLineInput[],
+    cmdPromoCode?: string,
+  ): Promise<
+    Result<{
+      readonly lines: readonly CartLineInput[];
+      readonly promoCode?: string;
+    }>
+  > {
+    const stored = await this.cartStore.getCart(this.request.actorId, branchId);
+    const lines = cmdItems && cmdItems.length > 0 ? cmdItems : (stored?.lines ?? []);
+    if (lines.length === 0) {
+      return err(new DomainError('EMPTY_CART', 'Cart is empty.', 400));
+    }
+    return ok({
+      lines,
+      promoCode: cmdPromoCode ?? stored?.promoCode,
+    });
+  }
+
   async execute(cmd: CheckoutOrderCommand): Promise<
     Result<{
       readonly orderId: string;
@@ -566,7 +583,7 @@ export class CheckoutOrderHandler
       return err(new DomainError('UNAUTHORIZED', 'Authenticated customer session required.', 401));
     }
 
-    const branch = await loadBranchPolicy(this.pool, cmd.branchId);
+    const branch = await loadBranchPolicy(this.uow, cmd.branchId);
     if (!branch) return err(new DomainError('BRANCH_NOT_FOUND', 'Branch not found.', 404));
 
     const capCheck = validateChannelCapability(branch, cmd.orderSource, cmd.paymentMode);
@@ -575,10 +592,10 @@ export class CheckoutOrderHandler
     const creditCheck = await this.assertCashCreditLimit(branch, cmd.paymentMode);
     if (!creditCheck.ok) return creditCheck;
 
-    const linesRes = await this.resolveCheckoutLines(cmd.branchId, cmd.items);
-    if (!linesRes.ok) return linesRes;
+    const cartRes = await this.resolveCheckoutCart(cmd.branchId, cmd.items, cmd.promoCode);
+    if (!cartRes.ok) return cartRes;
 
-    const hydrated = await hydrateOrderLines(this.pool, branch, linesRes.value);
+    const hydrated = await hydrateOrderLines(this.uow, branch, cartRes.value.lines);
     if (!hydrated.ok) return hydrated;
 
     const grossFood = hydrated.value.reduce((acc, l) => {
@@ -587,9 +604,9 @@ export class CheckoutOrderHandler
     }, new Decimal(0));
 
     const promoRes = await evaluatePromoCode({
-      pool: this.pool,
+      db: this.uow,
       restaurantId: branch.restaurantId,
-      promoCode: cmd.promoCode,
+      promoCode: cartRes.value.promoCode,
       grossSubtotal: grossFood,
       now: new Date(),
     });
@@ -667,18 +684,18 @@ export class PlacePosOrderHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly orderRepo: OrderRepository;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
   constructor(
-    pool: Pool,
+    uow: UnitOfWork,
     orderRepo: OrderRepository,
     authz: AuthorizationPolicy,
     request: RequestContext,
   ) {
-    this.pool = pool;
+    this.uow = uow;
     this.orderRepo = orderRepo;
     this.authz = authz;
     this.request = request;
@@ -697,10 +714,10 @@ export class PlacePosOrderHandler
     const access = this.authz.assertBranchAccess(branchId, 'orders:place');
     if (!access.ok) return access;
 
-    const branch = await loadBranchPolicy(this.pool, branchId);
+    const branch = await loadBranchPolicy(this.uow, branchId);
     if (!branch) return err(new DomainError('BRANCH_NOT_FOUND', 'Branch not found.', 404));
 
-    const hydrated = await hydrateOrderLines(this.pool, branch, cmd.items);
+    const hydrated = await hydrateOrderLines(this.uow, branch, cmd.items);
     if (!hydrated.ok) return hydrated;
 
     const orderId = crypto.randomUUID();
@@ -761,20 +778,20 @@ export class TransitionOrderStatusHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly orderRepo: OrderRepository;
   private readonly deliveryProvider: DeliveryProviderPort;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
   constructor(
-    pool: Pool,
+    uow: UnitOfWork,
     orderRepo: OrderRepository,
     deliveryProvider: DeliveryProviderPort,
     authz: AuthorizationPolicy,
     request: RequestContext,
   ) {
-    this.pool = pool;
+    this.uow = uow;
     this.orderRepo = orderRepo;
     this.deliveryProvider = deliveryProvider;
     this.authz = authz;
@@ -812,7 +829,7 @@ export class TransitionOrderStatusHandler
       order.snapshot.orderSource === 'ONLINE_DELIVERY' &&
       !order.snapshot.externalDeliveryId
     ) {
-      const branch = await loadBranchPolicy(this.pool, order.snapshot.branchId);
+      const branch = await loadBranchPolicy(this.uow, order.snapshot.branchId);
       if (branch?.deliveryMode === 'EXTERNAL_3PL') {
         const dispatch = await this.deliveryProvider.createDeliveryJob({
           orderId: order.id,

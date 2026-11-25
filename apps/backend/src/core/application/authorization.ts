@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/core/application/authorization.ts (Part 1 of 3)
 import {
   ALL_PERMISSIONS,
   CUSTOMER_PERMISSIONS,
@@ -80,7 +79,7 @@ export class HasPermissionSpec extends CompositeSpecification<{
     return request.permissions.includes(permission);
   }
 }
-// FILE: apps/backend/src/core/application/authorization.ts (Part 2 of 3)
+
 /**
  * Specification enforcing multi-tenant brand isolation across all repository and handler layers.
  */
@@ -163,7 +162,7 @@ export class CanDelegatePermissionsSpec extends CompositeSpecification<{
     return targetPermissions.every((perm) => held.has(perm));
   }
 }
-// FILE: apps/backend/src/core/application/authorization.ts (Part 3 of 3)
+
 export class AuthorizationPolicy {
   private readonly request: RequestContext;
   private readonly hasPermissionSpec = new HasPermissionSpec();

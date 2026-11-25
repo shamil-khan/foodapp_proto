@@ -98,7 +98,6 @@ describe('Storefront Orders, Double-Entry Billing, Multi-Scope Loyalty & Webhook
     expect(foreignItem.status).toBe(403);
     expect(foreignItem.body.code).toBe('TENANT_FORBIDDEN');
 
-    // FILE: apps/backend/tests/smoke/orders-billing-loyalty.smoke.test.ts (inside 401/403 test)
     const unauthPosList = await client.get<{
       code: string;
     }>('/api/pos/orders');

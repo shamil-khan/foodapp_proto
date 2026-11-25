@@ -1,17 +1,17 @@
-// FILE: apps/backend/src/catalog/infrastructure/catalog-repository.ts (Part 1 of 3)
 import {
   BranchMenuOverrideTable,
   CatalogBranchProjectionTable,
   CategoryTable,
+  type DbExecutor,
   ItemModifierTable,
   type KdsRoutingTarget,
   MenuItemTable,
   type MenuSelectionMode,
   MenuSnapshotTable,
-  type Pool,
   sqlInsert,
   sqlSelect,
   sqlUpdate,
+  type UnitOfWork,
 } from '@foodapp/db';
 import {
   type CompiledMenuSnapshot,
@@ -20,10 +20,10 @@ import {
 } from '@/catalog/domain/menu-snapshot-builder';
 
 export class CatalogRepository {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
 
-  constructor(pool: Pool) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork) {
+    this.uow = uow;
   }
 
   async getMenuItemRestaurantId(menuItemId: string): Promise<string | null> {
@@ -36,11 +36,7 @@ export class CatalogRepository {
       .activeOnly()
       .compile();
 
-    const itemRes = await this.pool.query<typeof itemLookup._result>(
-      itemLookup.text,
-      itemLookup.params,
-    );
-    const itemRow = itemRes.rows[0];
+    const itemRow = await this.uow.queryOne(itemLookup);
     if (!itemRow) return null;
 
     const cCols = CategoryTable.cols;
@@ -52,11 +48,8 @@ export class CatalogRepository {
       .activeOnly()
       .compile();
 
-    const catRes = await this.pool.query<typeof catLookup._result>(
-      catLookup.text,
-      catLookup.params,
-    );
-    return catRes.rows[0]?.restaurantId ?? null;
+    const catRow = await this.uow.queryOne(catLookup);
+    return catRow?.restaurantId ?? null;
   }
 
   async updateItemPrice(params: {
@@ -86,15 +79,16 @@ export class CatalogRepository {
       .whereNull(mCols.deletedAt)
       .compile();
 
-    const res = await this.pool.query(updateCmd.text, updateCmd.params);
+    const rowCount = await this.uow.execute(updateCmd);
     return {
-      updated: (res.rowCount ?? 0) === 1,
+      updated: rowCount === 1,
       restaurantId,
     };
   }
-  // FILE: apps/backend/src/catalog/infrastructure/catalog-repository.ts (Part 2 of 3)
+
   private async fetchModifiersByItem(
     itemIds: readonly string[],
+    tx: DbExecutor = this.uow,
   ): Promise<Map<string, SnapshotModifierDto[]>> {
     const modsByItem = new Map<string, SnapshotModifierDto[]>();
     if (itemIds.length === 0) return modsByItem;
@@ -111,10 +105,7 @@ export class CatalogRepository {
       .activeOnly()
       .compile();
 
-    const { rows: modifiers } = await this.pool.query<typeof modQuery._result>(
-      modQuery.text,
-      modQuery.params,
-    );
+    const modifiers = await tx.queryMany(modQuery);
 
     for (const mod of modifiers) {
       const list = modsByItem.get(mod.menuItemId) ?? [];
@@ -134,7 +125,10 @@ export class CatalogRepository {
     restaurantId: string;
     branchId: string;
     menuSelectionMode: MenuSelectionMode;
+    tx?: DbExecutor;
   }): Promise<void> {
+    const exec = params.tx ?? this.uow;
+
     const cCols = CategoryTable.cols;
     const catQuery = sqlSelect(CategoryTable)
       .select([
@@ -147,10 +141,7 @@ export class CatalogRepository {
       .orderBy(cCols.sortWeight, 'ASC')
       .compile();
 
-    const { rows: categories } = await this.pool.query<typeof catQuery._result>(
-      catQuery.text,
-      catQuery.params,
-    );
+    const categories = await exec.queryMany(catQuery);
     if (categories.length === 0) return;
 
     for (const cat of categories) {
@@ -180,11 +171,7 @@ export class CatalogRepository {
       .activeOnly()
       .compile();
 
-    const { rows: allItems } = await this.pool.query<typeof itemQuery._result>(
-      itemQuery.text,
-      itemQuery.params,
-    );
-
+    const allItems = await exec.queryMany(itemQuery);
     const oCols = BranchMenuOverrideTable.cols;
     const overrideQuery = sqlSelect(BranchMenuOverrideTable)
       .select([
@@ -197,10 +184,7 @@ export class CatalogRepository {
       .activeOnly()
       .compile();
 
-    const { rows: overrides } = await this.pool.query<typeof overrideQuery._result>(
-      overrideQuery.text,
-      overrideQuery.params,
-    );
+    const overrides = await exec.queryMany(overrideQuery);
     const overrideMap = new Map(
       overrides.map((o) => [
         o.menuItemId,
@@ -219,7 +203,10 @@ export class CatalogRepository {
       return ov ? ov.isIncluded : true;
     });
 
-    const modsByItem = await this.fetchModifiersByItem(visibleItems.map((i) => i.id));
+    const modsByItem = await this.fetchModifiersByItem(
+      visibleItems.map((i) => i.id),
+      exec,
+    );
 
     for (const item of visibleItems) {
       const ov = overrideMap.get(item.id);
@@ -243,11 +230,12 @@ export class CatalogRepository {
       });
     }
   }
-  // FILE: apps/backend/src/catalog/infrastructure/catalog-repository.ts (Part 3 of 3)
+
   private async persistCompiledSnapshot(
     branchId: string,
     compiled: CompiledMenuSnapshot,
     actorId: string,
+    tx: DbExecutor = this.uow,
   ): Promise<void> {
     const sCols = MenuSnapshotTable.cols;
     const existingSnap = sqlSelect(MenuSnapshotTable)
@@ -257,12 +245,7 @@ export class CatalogRepository {
       .whereEq(sCols.branchId, branchId)
       .compile();
 
-    const snapRes = await this.pool.query<typeof existingSnap._result>(
-      existingSnap.text,
-      existingSnap.params,
-    );
-
-    if (snapRes.rows[0]) {
+    if (await tx.exists(existingSnap)) {
       const updateSnap = sqlUpdate(MenuSnapshotTable)
         .set({
           versionHash: compiled.versionHash,
@@ -272,7 +255,7 @@ export class CatalogRepository {
         .whereEq(sCols.branchId, branchId)
         .compile();
 
-      await this.pool.query(updateSnap.text, updateSnap.params);
+      await tx.execute(updateSnap);
       return;
     }
 
@@ -286,16 +269,20 @@ export class CatalogRepository {
       })
       .compile();
 
-    await this.pool.query(insertSnap.text, insertSnap.params);
+    await tx.execute(insertSnap);
   }
 
   /**
    * Compiles the branch menu snapshot strictly from `CatalogBranchProjectionTable`
    * without querying `Restaurant` or `RestaurantBranch` tables in `brand`.
    */
+  // In `apps/backend/src/catalog/infrastructure/catalog-repository.ts`:
+  // 1. Add `type DbExecutor` to `@foodapp/db` import.
+  // 2. Pass `tx: DbExecutor = this.uow` to `fetchModifiersByItem`, `populateBranchMenuGraph`, `persistCompiledSnapshot`, and `rebuildAndPersistSnapshot`:
   async rebuildAndPersistSnapshot(
     branchId: string,
     actorId: string,
+    tx: DbExecutor = this.uow,
   ): Promise<CompiledMenuSnapshot | null> {
     const pCols = CatalogBranchProjectionTable.cols;
     const projQuery = sqlSelect(CatalogBranchProjectionTable)
@@ -311,11 +298,7 @@ export class CatalogRepository {
       .activeOnly()
       .compile();
 
-    const projRes = await this.pool.query<typeof projQuery._result>(
-      projQuery.text,
-      projQuery.params,
-    );
-    const branch = projRes.rows[0];
+    const branch = await tx.queryOne(projQuery);
     if (!branch) return null;
 
     const builder = new MenuSnapshotBuilder().setBranchContext({
@@ -331,9 +314,10 @@ export class CatalogRepository {
       restaurantId: branch.restaurantId,
       branchId: branch.branchId,
       menuSelectionMode: branch.menuSelectionMode as MenuSelectionMode,
+      tx,
     });
     const compiled = builder.build();
-    await this.persistCompiledSnapshot(branchId, compiled, actorId);
+    await this.persistCompiledSnapshot(branchId, compiled, actorId, tx);
 
     return compiled;
   }
@@ -348,7 +332,7 @@ export class CatalogRepository {
       .activeOnly()
       .compile();
 
-    const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
-    return (rows[0]?.serializedMenu as unknown as CompiledMenuSnapshot) ?? null;
+    const row = await this.uow.queryOne(q);
+    return (row?.serializedMenu as unknown as CompiledMenuSnapshot) ?? null;
   }
 }

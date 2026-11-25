@@ -6,12 +6,12 @@ import {
   type KdsRoutingTarget,
   MenuItemTable,
   type MenuPricingPolicyMode,
-  type Pool,
   type PriceApprovalStatus,
   PricingPolicyTable,
   sqlInsert,
   sqlSelect,
   sqlUpdate,
+  type UnitOfWork,
 } from '@foodapp/db';
 import {
   type PricingPolicyConfig,
@@ -23,7 +23,7 @@ import type { EventBus } from '@/core/application/event-bus';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
 
 export async function loadEffectivePricingPolicy(
-  pool: Pool,
+  uow: UnitOfWork,
   restaurantId: string,
   branchId: string,
 ): Promise<PricingPolicyConfig> {
@@ -43,7 +43,7 @@ export async function loadEffectivePricingPolicy(
     .activeOnly()
     .compile();
 
-  const { rows } = await pool.query<typeof q._result>(q.text, q.params);
+  const rows = await uow.queryMany(q);
   const chosen = rows.find((r) => r.branchId === branchId) ?? rows.find((r) => r.branchId === null);
 
   if (!chosen) {
@@ -84,12 +84,12 @@ export interface UpsertPricingPolicyCommand extends Command<Result<void>> {
 export class UpsertPricingPolicyHandler
   implements CommandHandler<UpsertPricingPolicyCommand, Result<void>>
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, authz: AuthorizationPolicy, request: RequestContext) {
+    this.uow = uow;
     this.authz = authz;
     this.request = request;
   }
@@ -108,8 +108,8 @@ export class UpsertPricingPolicyHandler
       .whereEq(pCols.restaurantId, cmd.restaurantId)
       .activeOnly()
       .compile();
-    const res = await this.pool.query<typeof sel._result>(sel.text, sel.params);
-    const existing = res.rows.find((r) => r.branchId === targetBranchId);
+    const rows = await this.uow.queryMany(sel);
+    const existing = rows.find((r) => r.branchId === targetBranchId);
 
     if (existing) {
       const upd = sqlUpdate(PricingPolicyTable)
@@ -126,7 +126,7 @@ export class UpsertPricingPolicyHandler
         .whereEq(pCols.id, existing.id)
         .whereNull(pCols.deletedAt)
         .compile();
-      await this.pool.query(upd.text, upd.params);
+      await this.uow.execute(upd);
       return ok(undefined);
     }
 
@@ -145,7 +145,7 @@ export class UpsertPricingPolicyHandler
         updatedBy: this.request.actorId,
       })
       .compile();
-    await this.pool.query(ins.text, ins.params);
+    await this.uow.execute(ins);
     return ok(undefined);
   }
 }
@@ -176,13 +176,18 @@ export class UpsertBranchMenuOverrideHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly eventBus: EventBus;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, eventBus: EventBus, authz: AuthorizationPolicy, request: RequestContext) {
-    this.pool = pool;
+  constructor(
+    uow: UnitOfWork,
+    eventBus: EventBus,
+    authz: AuthorizationPolicy,
+    request: RequestContext,
+  ) {
+    this.uow = uow;
     this.eventBus = eventBus;
     this.authz = authz;
     this.request = request;
@@ -201,7 +206,7 @@ export class UpsertBranchMenuOverrideHandler
         pendingPriceOverride: null,
       });
     }
-    const policy = await loadEffectivePricingPolicy(this.pool, restaurantId, branchId);
+    const policy = await loadEffectivePricingPolicy(this.uow, restaurantId, branchId);
     const strategy = resolveMenuPricingStrategy(policy.menuPricingMode);
     return strategy.evaluatePriceProposal({
       basePrice,
@@ -228,7 +233,7 @@ export class UpsertBranchMenuOverrideHandler
       .whereEq(oCols.menuItemId, cmd.menuItemId)
       .activeOnly()
       .compile();
-    const existing = (await this.pool.query<typeof exQ._result>(exQ.text, exQ.params)).rows[0];
+    const existing = await this.uow.queryOne(exQ);
     const hasPrice = cmd.proposedPrice !== undefined;
 
     if (existing) {
@@ -247,7 +252,7 @@ export class UpsertBranchMenuOverrideHandler
         .whereEq(oCols.id, existing.id)
         .whereNull(oCols.deletedAt)
         .compile();
-      await this.pool.query(upd.text, upd.params);
+      await this.uow.execute(upd);
       return;
     }
 
@@ -265,7 +270,7 @@ export class UpsertBranchMenuOverrideHandler
         updatedBy: this.request.actorId,
       })
       .compile();
-    await this.pool.query(ins.text, ins.params);
+    await this.uow.execute(ins);
   }
 
   async execute(cmd: UpsertBranchMenuOverrideCommand) {
@@ -278,7 +283,6 @@ export class UpsertBranchMenuOverrideHandler
     );
     if (!access.ok) return access;
 
-    // FILE: apps/backend/src/catalog/application/pricing-policy-commands.ts (UpsertBranchMenuOverrideHandler branch lookup)
     const bCols = CatalogBranchProjectionTable.cols;
     const bQ = sqlSelect(CatalogBranchProjectionTable)
       .select([
@@ -289,7 +293,7 @@ export class UpsertBranchMenuOverrideHandler
       .activeOnly()
       .compile();
 
-    const branch = (await this.pool.query<typeof bQ._result>(bQ.text, bQ.params)).rows[0];
+    const branch = await this.uow.queryOne(bQ);
     if (!branch) return err(new DomainError('BRANCH_NOT_FOUND', 'Branch not found.', 404));
 
     const mCols = MenuItemTable.cols;
@@ -301,7 +305,7 @@ export class UpsertBranchMenuOverrideHandler
       .whereEq(mCols.id, cmd.menuItemId)
       .activeOnly()
       .compile();
-    const item = (await this.pool.query<typeof mQ._result>(mQ.text, mQ.params)).rows[0];
+    const item = await this.uow.queryOne(mQ);
     if (!item) return err(new DomainError('ITEM_NOT_FOUND', 'Menu item not found.', 404));
 
     const decisionRes = await this.resolveDecision(
@@ -347,13 +351,18 @@ export interface ReviewPriceOverrideCommand extends Command<Result<void>> {
 export class ReviewPriceOverrideHandler
   implements CommandHandler<ReviewPriceOverrideCommand, Result<void>>
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly eventBus: EventBus;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, eventBus: EventBus, authz: AuthorizationPolicy, request: RequestContext) {
-    this.pool = pool;
+  constructor(
+    uow: UnitOfWork,
+    eventBus: EventBus,
+    authz: AuthorizationPolicy,
+    request: RequestContext,
+  ) {
+    this.uow = uow;
     this.eventBus = eventBus;
     this.authz = authz;
     this.request = request;
@@ -374,7 +383,7 @@ export class ReviewPriceOverrideHandler
       .whereEq(oCols.menuItemId, cmd.menuItemId)
       .activeOnly()
       .compile();
-    const row = (await this.pool.query<typeof sel._result>(sel.text, sel.params)).rows[0];
+    const row = await this.uow.queryOne(sel);
     if (row?.approvalStatus !== 'PENDING' || row.pendingPriceOverride === null) {
       return err(
         new DomainError(
@@ -397,7 +406,7 @@ export class ReviewPriceOverrideHandler
       .whereEq(oCols.id, row.id)
       .whereNull(oCols.deletedAt)
       .compile();
-    await this.pool.query(upd.text, upd.params);
+    await this.uow.execute(upd);
 
     await this.eventBus.publish([
       {
@@ -450,13 +459,18 @@ export class CreateMenuItemHandler
       }>
     >
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly eventBus: EventBus;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, eventBus: EventBus, authz: AuthorizationPolicy, request: RequestContext) {
-    this.pool = pool;
+  constructor(
+    uow: UnitOfWork,
+    eventBus: EventBus,
+    authz: AuthorizationPolicy,
+    request: RequestContext,
+  ) {
+    this.uow = uow;
     this.eventBus = eventBus;
     this.authz = authz;
     this.request = request;
@@ -492,7 +506,7 @@ export class CreateMenuItemHandler
     if (!access.ok) return access;
 
     if (cmd.branchId) {
-      const policy = await loadEffectivePricingPolicy(this.pool, cmd.restaurantId, cmd.branchId);
+      const policy = await loadEffectivePricingPolicy(this.uow, cmd.restaurantId, cmd.branchId);
       if (!policy.allowBranchLocalItems && !this.authz.hasPermission('pricing:policy:manage')) {
         return err(
           new DomainError(
@@ -513,7 +527,7 @@ export class CreateMenuItemHandler
       .whereEq(cCols.id, cmd.categoryId)
       .activeOnly()
       .compile();
-    const cat = (await this.pool.query<typeof catQ._result>(catQ.text, catQ.params)).rows[0];
+    const cat = await this.uow.queryOne(catQ);
     if (cat?.restaurantId !== cmd.restaurantId) {
       return err(new DomainError('CATEGORY_NOT_FOUND', 'Category not found in brand.', 404));
     }
@@ -540,7 +554,8 @@ export class CreateMenuItemHandler
         mCols.id,
       ])
       .compile();
-    const menuItemId = (await this.pool.query(ins.text, ins.params)).rows[0]?.id;
+    const inserted = await this.uow.queryOne(ins);
+    const menuItemId = inserted?.id;
     if (!menuItemId) throw new Error('Failed to create MenuItem');
     if (cmd.branchId) {
       await this.eventBus.publish([

@@ -44,9 +44,6 @@ describe('billing.b2b-settlement — Online Payable vs Cash Commission Netting &
         actorSource: 'SYSTEM',
         restaurantId,
         branchId,
-        allowedBranchIds: [
-          branchId,
-        ],
         permissions: ALL_PERMISSIONS,
       },
       log: new AppLogger('int-b2b-settle'),
@@ -118,9 +115,6 @@ describe('billing.b2b-settlement — Online Payable vs Cash Commission Netting &
         actorSource: 'SYSTEM',
         restaurantId: cashOnlyBrandId,
         branchId: cashOnlyBranchId,
-        allowedBranchIds: [
-          cashOnlyBranchId,
-        ],
         permissions: ALL_PERMISSIONS,
       },
       log: new AppLogger('int-b2b-cash-only'),

@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/orders/services/order-routes.ts (Part 1 of 2)
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@/container';
 import {
@@ -70,7 +69,7 @@ export function createStorefrontOrderRoutes(idempotencyStore: IdempotencyStorePo
 
   return routes;
 }
-// FILE: apps/backend/src/orders/services/order-routes.ts (Part 2 of 2)
+
 export function createPosOrderRoutes(idempotencyStore: IdempotencyStorePort) {
   const routes = new OpenAPIHono<AppEnv>({
     defaultHook: openApiValidationHook,

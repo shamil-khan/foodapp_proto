@@ -1,3 +1,4 @@
+import type { DbExecutor } from '@foodapp/db';
 import type Decimal from 'decimal.js';
 import type { Result } from '@/core/domain/result';
 import type { LoyaltyIssuerScope } from '@/loyalty/domain/loyalty-events';
@@ -31,16 +32,19 @@ export interface HeldPointsQuote {
  * Hexagonal port exposed by `loyalty` to `orders` and `billing` so cross-context
  * holds, settlement commits, and B2B merchant fee offsets never touch raw tables.
  */
+
 export interface LoyaltySettlementPort {
   holdCheckoutPoints(
     input: HoldCheckoutPointsInput,
     actorId: string,
+    tx?: DbExecutor,
   ): Promise<Result<HeldPointsQuote>>;
   releaseCheckoutHold(
     orderId: string,
     userId: string,
     reason: string,
     actorId: string,
+    tx?: DbExecutor,
   ): Promise<void>;
   settleOrderLoyalty(params: {
     readonly orderId: string;
@@ -49,12 +53,14 @@ export interface LoyaltySettlementPort {
     readonly netFoodSubtotalGbp: Decimal;
     readonly allowLoyaltyEarn: boolean;
     readonly actorId: string;
+    readonly tx?: DbExecutor;
   }): Promise<void>;
   redeemMerchantPointsForFeeOffset(params: {
     readonly restaurantId: string;
     readonly settlementId: string;
     readonly maxOffsetGbp: Decimal;
     readonly actorId: string;
+    readonly tx?: DbExecutor;
   }): Promise<{
     readonly pointsRedeemed: number;
     readonly offsetGbp: Decimal;

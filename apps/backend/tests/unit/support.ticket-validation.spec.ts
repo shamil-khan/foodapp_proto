@@ -1,4 +1,3 @@
-// FILE: apps/backend/tests/unit/support.ticket-validation.spec.ts
 import { describe, expect, it } from 'vitest';
 import {
   evaluateSupportTicketAccess,

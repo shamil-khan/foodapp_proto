@@ -1,6 +1,4 @@
-// FILE: apps/backend/src/iam/application/role-queries.ts (Part 1 of 2)
 import {
-  type Pool,
   StaffRolePermissionTable,
   StaffRoleTable,
   sqlSelect,
@@ -12,6 +10,7 @@ import {
 import type { AuthorizationPolicy } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
 import { DomainError } from '@/core/domain/result';
+import type { ReadRepository } from '@/core/infrastructure/read-repository';
 
 export interface StaffRoleWithRightsDto {
   id: string;
@@ -47,11 +46,11 @@ export interface GetRestaurantStaffRolesQuery extends Query<StaffRoleWithRightsD
 export class GetRestaurantStaffRolesHandler
   implements QueryHandler<GetRestaurantStaffRolesQuery, StaffRoleWithRightsDto[]>
 {
-  private readonly pool: Pool;
+  private readonly readRepo: ReadRepository;
   private readonly authz: AuthorizationPolicy;
 
-  constructor(pool: Pool, authz: AuthorizationPolicy) {
-    this.pool = pool;
+  constructor(readRepo: ReadRepository, authz: AuthorizationPolicy) {
+    this.readRepo = readRepo;
     this.authz = authz;
   }
 
@@ -75,13 +74,10 @@ export class GetRestaurantStaffRolesHandler
       .orderBy(rCols.name, 'ASC')
       .compile();
 
-    const { rows: roles } = await this.pool.query<typeof rolesQuery._result>(
-      rolesQuery.text,
-      rolesQuery.params,
-    );
+    const roles = await this.readRepo.findMany(rolesQuery);
 
     if (roles.length === 0) return [];
-    // FILE: apps/backend/src/iam/application/role-queries.ts (Part 2 of 2)
+
     const pCols = StaffRolePermissionTable.cols;
     const permsQuery = sqlSelect(StaffRolePermissionTable)
       .select([
@@ -95,10 +91,7 @@ export class GetRestaurantStaffRolesHandler
       .activeOnly()
       .compile();
 
-    const { rows: permRows } = await this.pool.query<typeof permsQuery._result>(
-      permsQuery.text,
-      permsQuery.params,
-    );
+    const permRows = await this.readRepo.findMany(permsQuery);
 
     const permsByRole = new Map<string, TenantPermission[]>();
     for (const row of permRows) {

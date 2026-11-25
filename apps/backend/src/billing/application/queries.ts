@@ -1,8 +1,9 @@
-import { FinancialLedgerTable, MerchantSettlementTable, type Pool, sqlSelect } from '@foodapp/db';
+import { FinancialLedgerTable, MerchantSettlementTable, sqlSelect } from '@foodapp/db';
 import type { BillingRepository } from '@/billing/infrastructure/billing-repository';
 import type { AuthorizationPolicy } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
 import { DomainError } from '@/core/domain/result';
+import type { ReadRepository } from '@/core/infrastructure/read-repository';
 
 export interface RestaurantBillingSummaryDto {
   readonly restaurantId: string;
@@ -35,12 +36,12 @@ export interface GetRestaurantBillingQuery extends Query<RestaurantBillingSummar
 export class GetRestaurantBillingHandler
   implements QueryHandler<GetRestaurantBillingQuery, RestaurantBillingSummaryDto>
 {
-  private readonly pool: Pool;
+  private readonly readRepo: ReadRepository;
   private readonly repo: BillingRepository;
   private readonly authz: AuthorizationPolicy;
 
-  constructor(pool: Pool, repo: BillingRepository, authz: AuthorizationPolicy) {
-    this.pool = pool;
+  constructor(readRepo: ReadRepository, repo: BillingRepository, authz: AuthorizationPolicy) {
+    this.readRepo = readRepo;
     this.repo = repo;
     this.authz = authz;
   }
@@ -80,15 +81,15 @@ export class GetRestaurantBillingHandler
       .compile();
 
     const [jRows, sRows] = await Promise.all([
-      this.pool.query<typeof jQ._result>(jQ.text, jQ.params),
-      this.pool.query<typeof sQ._result>(sQ.text, sQ.params),
+      this.readRepo.findMany(jQ),
+      this.readRepo.findMany(sQ),
     ]);
 
     return {
       restaurantId: query.restaurantId,
       unsettledOnlinePayableGbp: state.merchantPayableGbp,
       unsettledCashReceivableGbp: state.cashCommissionReceivableGbp,
-      recentJournalLines: jRows.rows.map((r) => {
+      recentJournalLines: jRows.map((r) => {
         const isDebit = Number.parseFloat(r.debitAmount) > 0;
         return {
           id: r.id,
@@ -100,7 +101,7 @@ export class GetRestaurantBillingHandler
           createdAt: new Date(r.createdAt).toISOString(),
         };
       }),
-      settlements: sRows.rows.map((s) => ({
+      settlements: sRows.map((s) => ({
         id: s.id,
         grossOnlinePayableGbp: s.grossOnlinePayableGbp,
         cashCommissionReceivableGbp: s.cashCommissionReceivableGbp,

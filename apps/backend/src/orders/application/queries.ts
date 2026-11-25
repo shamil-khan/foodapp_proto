@@ -3,12 +3,12 @@ import {
   OrderLineItemTable,
   OrderMilestoneLogTable,
   OrderTable,
-  type Pool,
   sqlSelect,
 } from '@foodapp/db';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
 import { DomainError } from '@/core/domain/result';
+import type { ReadRepository } from '@/core/infrastructure/read-repository';
 
 export interface PosOrderSummaryDto {
   readonly id: string;
@@ -38,11 +38,11 @@ export interface GetRestaurantOrdersQuery extends Query<PosOrderSummaryDto[]> {
 export class GetRestaurantOrdersHandler
   implements QueryHandler<GetRestaurantOrdersQuery, PosOrderSummaryDto[]>
 {
-  private readonly pool: Pool;
+  private readonly readRepo: ReadRepository;
   private readonly authz: AuthorizationPolicy;
 
-  constructor(pool: Pool, authz: AuthorizationPolicy) {
-    this.pool = pool;
+  constructor(readRepo: ReadRepository, authz: AuthorizationPolicy) {
+    this.readRepo = readRepo;
     this.authz = authz;
   }
 
@@ -77,10 +77,7 @@ export class GetRestaurantOrdersHandler
       .take(query.take ?? 25)
       .compile();
 
-    const { rows: orderRows } = await this.pool.query<typeof ordersQuery._result>(
-      ordersQuery.text,
-      ordersQuery.params,
-    );
+    const orderRows = await this.readRepo.findMany(ordersQuery);
     if (orderRows.length === 0) return [];
 
     const mCols = OrderMilestoneLogTable.cols;
@@ -97,10 +94,7 @@ export class GetRestaurantOrdersHandler
       .orderBy(mCols.createdAt, 'DESC')
       .compile();
 
-    const { rows: milestoneRows } = await this.pool.query<typeof milestonesQuery._result>(
-      milestonesQuery.text,
-      milestonesQuery.params,
-    );
+    const milestoneRows = await this.readRepo.findMany(milestonesQuery);
 
     const latestByOrder = new Map<string, string>();
     for (const m of milestoneRows) {
@@ -163,12 +157,12 @@ export interface GetOrderByIdQuery extends Query<OrderDetailDto | null> {
 }
 
 export class GetOrderByIdHandler implements QueryHandler<GetOrderByIdQuery, OrderDetailDto | null> {
-  private readonly pool: Pool;
+  private readonly readRepo: ReadRepository;
   private readonly authz: AuthorizationPolicy;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, authz: AuthorizationPolicy, request: RequestContext) {
-    this.pool = pool;
+  constructor(readRepo: ReadRepository, authz: AuthorizationPolicy, request: RequestContext) {
+    this.readRepo = readRepo;
     this.authz = authz;
     this.request = request;
   }
@@ -176,7 +170,7 @@ export class GetOrderByIdHandler implements QueryHandler<GetOrderByIdQuery, Orde
   async execute(query: GetOrderByIdQuery): Promise<OrderDetailDto | null> {
     const oCols = OrderTable.cols;
     const oQ = sqlSelect(OrderTable).whereEq(oCols.id, query.orderId).activeOnly().compile();
-    const order = (await this.pool.query<typeof oQ._result>(oQ.text, oQ.params)).rows[0];
+    const order = await this.readRepo.findOne(oQ);
     if (!order) return null;
 
     if (this.request.actorSource === 'GLOBAL_USER' && !this.authz.isPlatformAdmin()) {
@@ -195,7 +189,7 @@ export class GetOrderByIdHandler implements QueryHandler<GetOrderByIdQuery, Orde
       .whereEq(liCols.orderId, order.id)
       .activeOnly()
       .compile();
-    const lines = (await this.pool.query<typeof liQ._result>(liQ.text, liQ.params)).rows;
+    const lines = await this.readRepo.findMany(liQ);
 
     return {
       id: order.id,
@@ -245,10 +239,10 @@ export interface GetOrderEventsSinceQuery extends Query<OrderStreamEventDto[]> {
 export class GetOrderEventsSinceHandler
   implements QueryHandler<GetOrderEventsSinceQuery, OrderStreamEventDto[]>
 {
-  private readonly pool: Pool;
+  private readonly readRepo: ReadRepository;
 
-  constructor(pool: Pool) {
-    this.pool = pool;
+  constructor(readRepo: ReadRepository) {
+    this.readRepo = readRepo;
   }
 
   async execute(query: GetOrderEventsSinceQuery): Promise<OrderStreamEventDto[]> {
@@ -266,7 +260,7 @@ export class GetOrderEventsSinceHandler
       .orderBy(eCols.version, 'ASC')
       .compile();
 
-    const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
+    const rows = await this.readRepo.findMany(q);
     return rows.map((r) => ({
       eventId: r.id,
       version: r.version,

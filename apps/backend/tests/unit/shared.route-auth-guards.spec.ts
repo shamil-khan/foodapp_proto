@@ -1,4 +1,3 @@
-// FILE: apps/backend/tests/unit/shared.route-auth-guards.spec.ts (Part 1 of 2)
 import { SYSTEM_ACTORS } from '@foodapp/db';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { describe, expect, it } from 'vitest';
@@ -47,7 +46,7 @@ function buildAppWithActor(actor: RequestContext) {
 
   return app;
 }
-// FILE: apps/backend/tests/unit/shared.route-auth-guards.spec.ts (Part 2 of 2)
+
 describe('shared.route-auth-guards — Fail-Fast 401 & Three-Actor 403 Isolation', () => {
   const sampleUuid = '00000000-0000-4000-8000-000000000001';
 

@@ -1,7 +1,8 @@
-import { LoyaltyLedgerTable, type Pool, sqlSelect } from '@foodapp/db';
+import { LoyaltyLedgerTable, sqlSelect } from '@foodapp/db';
 import type { AuthorizationPolicy } from '@/core/application/authorization';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
 import { DomainError } from '@/core/domain/result';
+import type { ReadRepository } from '@/core/infrastructure/read-repository';
 import type { LoyaltyIssuerScope } from '@/loyalty/domain/loyalty-events';
 import type { LoyaltyRepository } from '@/loyalty/infrastructure/loyalty-repository';
 
@@ -33,12 +34,12 @@ export interface GetCustomerLoyaltyQuery extends Query<CustomerLoyaltySummaryDto
 export class GetCustomerLoyaltyHandler
   implements QueryHandler<GetCustomerLoyaltyQuery, CustomerLoyaltySummaryDto>
 {
-  private readonly pool: Pool;
+  private readonly readRepo: ReadRepository;
   private readonly repo: LoyaltyRepository;
   private readonly authz: AuthorizationPolicy;
 
-  constructor(pool: Pool, repo: LoyaltyRepository, authz: AuthorizationPolicy) {
-    this.pool = pool;
+  constructor(readRepo: ReadRepository, repo: LoyaltyRepository, authz: AuthorizationPolicy) {
+    this.readRepo = readRepo;
     this.repo = repo;
     this.authz = authz;
   }
@@ -58,7 +59,7 @@ export class GetCustomerLoyaltyHandler
     });
 
     const lCols = LoyaltyLedgerTable.cols;
-    const q = sqlSelect(LoyaltyLedgerTable)
+    const builder = sqlSelect(LoyaltyLedgerTable)
       .select([
         lCols.id,
         lCols.orderId,
@@ -73,12 +74,17 @@ export class GetCustomerLoyaltyHandler
       .whereEq(lCols.holderType, 'CUSTOMER')
       .whereEq(lCols.holderId, query.userId)
       .whereEq(lCols.issuerScope, scope)
-      .activeOnly()
-      .orderBy(lCols.createdAt, 'DESC')
-      .take(50)
-      .compile();
+      .activeOnly();
 
-    const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
+    if (scope === 'MERCHANT' && query.merchantId) {
+      builder.whereEq(lCols.issuerMerchantId, query.merchantId);
+    } else {
+      builder.whereNull(lCols.issuerMerchantId);
+    }
+
+    const q = builder.orderBy(lCols.createdAt, 'DESC').take(50).compile();
+
+    const rows = await this.readRepo.findMany(q);
     return {
       userId: query.userId,
       issuerScope: scope,

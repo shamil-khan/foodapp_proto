@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/catalog/services/catalog-schemas.ts (Part 1 of 4)
 import { createRoute, z } from '@hono/zod-openapi';
 import {
   DomainErrorResponseSchema,
@@ -75,7 +74,7 @@ export const CreateMenuItemBodySchema = z.object({
     ])
     .optional(),
 });
-// FILE: apps/backend/src/catalog/services/catalog-schemas.ts (Part 2 of 4)
+
 export const getBranchMenuSnapshotRoute = createRoute({
   method: 'get',
   path: '/branches/{branchId}/menu',
@@ -194,7 +193,7 @@ export const upsertPricingPolicyRoute = createRoute({
     },
   },
 });
-// FILE: apps/backend/src/catalog/services/catalog-schemas.ts (Part 3 of 4)
+
 export const upsertBranchMenuOverrideRoute = createRoute({
   method: 'put',
   path: '/branches/{branchId}/menu/{itemId}',
@@ -350,7 +349,7 @@ export const reviewPriceOverrideRoute = createRoute({
     },
   },
 });
-// FILE: apps/backend/src/catalog/services/catalog-schemas.ts (Part 4 of 4)
+
 export const createMenuItemRoute = createRoute({
   method: 'post',
   path: '/items',

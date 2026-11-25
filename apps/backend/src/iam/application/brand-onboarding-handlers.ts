@@ -1,7 +1,6 @@
-// FILE: apps/backend/src/iam/application/brand-onboarding-handlers.ts (Part 1 of 2)
 import * as crypto from 'node:crypto';
 import {
-  type Pool,
+  type DbExecutor,
   ProcessedEventTable,
   RestaurantStaffTable,
   StaffBranchAssignmentTable,
@@ -10,6 +9,7 @@ import {
   SYSTEM_ROLE_DEFINITIONS,
   type SystemRoleName,
   sqlInsert,
+  type UnitOfWork,
 } from '@foodapp/db';
 import type { EventBus } from '@/core/application/event-bus';
 import { AppLogger } from '@/logger';
@@ -29,22 +29,17 @@ interface CompensationEventPayload {
   readonly ownerStaffId: string;
 }
 
-/**
- * Listens to `BrandRegistered` to bootstrap initial system roles, permissions, owner staff,
- * and primary branch assignment inside `iam`, and executes hard-delete compensation if
- * downstream onboarding fails.
- */
 export class BrandIamOnboardingHandler {
   private readonly log = new AppLogger('iam-brand-onboarding');
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly eventBus: EventBus;
 
-  constructor(pool: Pool, eventBus: EventBus) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, eventBus: EventBus) {
+    this.uow = uow;
     this.eventBus = eventBus;
   }
 
-  private async claimEventOnce(eventId: string): Promise<boolean> {
+  private async claimEventOnce(eventId: string, tx: DbExecutor): Promise<boolean> {
     const pCols = ProcessedEventTable.cols;
     const ins = sqlInsert(ProcessedEventTable)
       .values({
@@ -59,43 +54,35 @@ export class BrandIamOnboardingHandler {
       ])
       .compile();
 
-    const res = await this.pool.query<typeof ins._result>(ins.text, ins.params);
-    return (res.rowCount ?? 0) === 1;
+    const row = await tx.queryOne(ins);
+    return Boolean(row);
   }
-  // FILE: apps/backend/src/iam/application/brand-onboarding-handlers.ts (Part 2 of 2)
-  // FILE: apps/backend/src/iam/application/brand-onboarding-handlers.ts (Part 2 of 2)
+
   private async purgeIamRecords(restaurantId: string, ownerStaffId: string): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(`DELETE FROM "StaffBranchAssignment" WHERE "staffId" = $1`, [
+    await this.uow.transaction(async (tx) => {
+      await tx.executeRaw(`DELETE FROM "StaffBranchAssignment" WHERE "staffId" = $1`, [
         ownerStaffId,
       ]);
-      await client.query(`DELETE FROM "RestaurantStaff" WHERE "restaurantId" = $1`, [
+      await tx.executeRaw(`DELETE FROM "RestaurantStaff" WHERE "restaurantId" = $1`, [
         restaurantId,
       ]);
-      await client.query(
+      await tx.executeRaw(
         `DELETE FROM "StaffRolePermission" WHERE "staffRoleId" IN (SELECT "id" FROM "StaffRole" WHERE "restaurantId" = $1)`,
         [
           restaurantId,
         ],
       );
-      await client.query(`DELETE FROM "StaffRole" WHERE "restaurantId" = $1`, [
+      await tx.executeRaw(`DELETE FROM "StaffRole" WHERE "restaurantId" = $1`, [
         restaurantId,
       ]);
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   private async seedBrandRolesAndOwner(
+    eventId: string,
     p: BrandRegisteredEventPayload,
     actorId: string,
-  ): Promise<string> {
+  ): Promise<string | null> {
     const rolesToSeed: readonly SystemRoleName[] = p.isMultiBranchEnterprise
       ? [
           'BRAND_OWNER',
@@ -111,10 +98,10 @@ export class BrandIamOnboardingHandler {
         ];
     const ownerRoleName: SystemRoleName = p.isMultiBranchEnterprise ? 'BRAND_OWNER' : 'OWNER';
 
-    const client = await this.pool.connect();
-    let ownerRoleId = '';
-    try {
-      await client.query('BEGIN');
+    return await this.uow.transaction(async (tx) => {
+      if (!(await this.claimEventOnce(eventId, tx))) return null;
+
+      let ownerRoleId = '';
       const srCols = StaffRoleTable.cols;
       for (const roleName of rolesToSeed) {
         const def = SYSTEM_ROLE_DEFINITIONS[roleName];
@@ -131,8 +118,8 @@ export class BrandIamOnboardingHandler {
             srCols.id,
           ])
           .compile();
-        const roleRes = await client.query<typeof roleIns._result>(roleIns.text, roleIns.params);
-        const createdRoleId = roleRes.rows[0]?.id;
+        const roleRow = await tx.queryOne(roleIns);
+        const createdRoleId = roleRow?.id;
         if (!createdRoleId) throw new Error(`Failed to seed role ${roleName}`);
         if (roleName === ownerRoleName) ownerRoleId = createdRoleId;
 
@@ -145,7 +132,7 @@ export class BrandIamOnboardingHandler {
               updatedBy: actorId,
             })
             .compile();
-          await client.query(permIns.text, permIns.params);
+          await tx.execute(permIns);
         }
       }
 
@@ -162,7 +149,7 @@ export class BrandIamOnboardingHandler {
           updatedBy: actorId,
         })
         .compile();
-      await client.query(staffIns.text, staffIns.params);
+      await tx.execute(staffIns);
 
       const assignIns = sqlInsert(StaffBranchAssignmentTable)
         .values({
@@ -174,43 +161,19 @@ export class BrandIamOnboardingHandler {
           updatedBy: actorId,
         })
         .compile();
-      await client.query(assignIns.text, assignIns.params);
+      await tx.execute(assignIns);
 
-      await client.query('COMMIT');
       return ownerRoleId;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   public register(eventBus: EventBus): void {
     eventBus.subscribe('BrandRegistered', async (event) => {
-      if (!(await this.claimEventOnce(event.eventId))) return;
       const p = event.payload as unknown as BrandRegisteredEventPayload;
 
+      let ownerRoleId: string | null = null;
       try {
-        const ownerRoleId = await this.seedBrandRolesAndOwner(p, event.metadata.actorId);
-        await this.eventBus.publish([
-          {
-            eventId: crypto.randomUUID(),
-            aggregateId: p.restaurantId,
-            aggregateType: 'IamOnboarding',
-            eventType: 'BrandOwnerBootstrapped',
-            version: 1,
-            occurredAt: new Date(),
-            payload: {
-              restaurantId: p.restaurantId,
-              branchId: p.branchId,
-              ownerStaffId: p.ownerStaffId,
-              ownerRoleId,
-            },
-            metadata: event.metadata,
-          },
-        ]);
-        this.log.info`Bootstrapped IAM roles & owner ${p.ownerStaffId} for brand ${p.restaurantId}`;
+        ownerRoleId = await this.seedBrandRolesAndOwner(event.eventId, p, event.metadata.actorId);
       } catch (error) {
         const reason = error instanceof Error ? error.message : 'IAM onboarding failed';
         await this.eventBus.publish([
@@ -231,7 +194,29 @@ export class BrandIamOnboardingHandler {
             metadata: event.metadata,
           },
         ]);
+        return;
       }
+
+      if (!ownerRoleId) return;
+
+      await this.eventBus.publish([
+        {
+          eventId: crypto.randomUUID(),
+          aggregateId: p.restaurantId,
+          aggregateType: 'IamOnboarding',
+          eventType: 'BrandOwnerBootstrapped',
+          version: 1,
+          occurredAt: new Date(),
+          payload: {
+            restaurantId: p.restaurantId,
+            branchId: p.branchId,
+            ownerStaffId: p.ownerStaffId,
+            ownerRoleId,
+          },
+          metadata: event.metadata,
+        },
+      ]);
+      this.log.info`Bootstrapped IAM roles & owner ${p.ownerStaffId} for brand ${p.restaurantId}`;
     });
 
     eventBus.subscribe('BrandOnboardingCompensationRequested', async (event) => {

@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/brand/services/brand-controller.ts (Part 1 of 2)
 import type { Context } from 'hono';
 import type {
   BrandStorefrontResponseDto,
@@ -107,7 +106,7 @@ export class BrandController {
       );
     return c.json(resolved, 200);
   }
-  // FILE: apps/backend/src/brand/services/brand-controller.ts (Part 2 of 2)
+
   async createBrandBranch(c: Context<AppEnv>, body: Record<string, unknown>) {
     const restaurantId = (body.restaurantId as string | undefined) ?? this.request.restaurantId;
     if (!restaurantId)

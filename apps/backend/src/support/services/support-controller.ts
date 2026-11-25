@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/support/services/support-controller.ts
 import type { PlatformSupportScope } from '@foodapp/db';
 import type { Context } from 'hono';
 import type { AppEnv, RequestContext } from '@/container';

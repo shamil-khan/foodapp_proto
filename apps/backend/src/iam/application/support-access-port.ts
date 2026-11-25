@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/iam/application/support-access-port.ts
 import type { PlatformSupportScope } from '@foodapp/db';
 import type { ActiveSupportGrant } from '@/core/application/authorization';
 import type { DomainError, Result } from '@/core/domain/result';

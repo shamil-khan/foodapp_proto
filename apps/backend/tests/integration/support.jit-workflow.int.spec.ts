@@ -1,4 +1,3 @@
-// FILE: apps/backend/tests/integration/support.jit-workflow.int.spec.ts
 import { randomUUID } from 'node:crypto';
 import { pgPool, redisClient, SYSTEM_ROLE_DEFINITIONS } from '@foodapp/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

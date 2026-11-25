@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/catalog/services/catalog-routes.ts
 import { OpenAPIHono } from '@hono/zod-openapi';
 import {
   createMenuItemRoute,

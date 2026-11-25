@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 1 of 4)
 import { ALL_PERMISSIONS, TENANT_PERMISSIONS } from '@foodapp/db';
 import { createRoute, z } from '@hono/zod-openapi';
 import {
@@ -90,7 +89,7 @@ export const PosLoginResponseSchema = z
     staff: PosStaffClaimsSchema,
   })
   .openapi('PosLoginResponse');
-// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 2 of 4)
+
 export const ActiveActorProfileSchema = z
   .object({
     id: z.uuid(),
@@ -178,7 +177,7 @@ export const AssignStaffBranchAccessBodySchema = z
     isPrimary: z.boolean().optional(),
   })
   .openapi('AssignStaffBranchAccessBody');
-// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 3 of 4)
+
 export const loginPosStaffRoute = createRoute({
   method: 'post',
   path: '/pos/auth/login',
@@ -327,7 +326,7 @@ export const switchPosBranchRoute = createRoute({
     },
   },
 });
-// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 4 of 7)
+
 export const logoutPosStaffRoute = createRoute({
   method: 'post',
   path: '/pos/auth/logout',
@@ -455,7 +454,7 @@ export const listAssignablePermissionsRoute = createRoute({
     },
   },
 });
-// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 5 of 7)
+
 export const listStaffRolesRoute = createRoute({
   method: 'get',
   path: '/pos/roles',
@@ -608,7 +607,7 @@ export const createStaffRoleRoute = createRoute({
     },
   },
 });
-// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 6 of 7)
+
 export const updateStaffRoleRoute = createRoute({
   method: 'patch',
   path: '/pos/roles/{roleId}',
@@ -756,7 +755,7 @@ export const deleteStaffRoleRoute = createRoute({
     },
   },
 });
-// FILE: apps/backend/src/iam/services/iam-schemas.ts (Part 7 of 7)
+
 export const assignStaffBranchAccessRoute = createRoute({
   method: 'patch',
   path: '/pos/staff/{staffId}/branch-access',

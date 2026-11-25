@@ -1,4 +1,3 @@
-// FILE: apps/backend/src/brand/services/brand-schemas.ts (Part 1 of 4)
 import { createRoute, z } from '@hono/zod-openapi';
 import { RESERVED_BRAND_HANDLES } from '@/brand/application/brand-commands';
 import {
@@ -97,7 +96,7 @@ export const BranchIdParamSchema = z.object({
     },
   }),
 });
-// FILE: apps/backend/src/brand/services/brand-schemas.ts (Part 2 of 4)
+
 export const RegisterBrandBodySchema = z
   .object({
     brandName: z.string().min(2).max(120),
@@ -214,7 +213,7 @@ export const ReviewWhitelistBodySchema = z.object({
     'REJECTED',
   ]),
 });
-// FILE: apps/backend/src/brand/services/brand-schemas.ts (Part 3 of 4)
+
 export const listBrandsRoute = createRoute({
   method: 'get',
   path: '/',
@@ -380,7 +379,7 @@ export const resolveBranchBySlugRoute = createRoute({
     },
   },
 });
-// FILE: apps/backend/src/brand/services/brand-schemas.ts (Part 4 of 4)
+
 export const createBrandBranchRoute = createRoute({
   method: 'post',
   path: '/branches',

@@ -1,4 +1,3 @@
-// FILE: apps/backend/tests/integration/brand-catalog.onboarding-sync-saga.int.spec.ts
 import { randomUUID } from 'node:crypto';
 import { pgPool, redisClient, SYSTEM_ACTORS } from '@foodapp/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -53,7 +52,6 @@ describe('brand-catalog.onboarding-sync-saga — All-or-Nothing Onboarding Rollb
 
       const { restaurantId, branchId, ownerStaffId } = reg.value;
 
-      // FILE: apps/backend/tests/integration/brand-catalog.onboarding-sync-saga.int.spec.ts (Lines 52-74)
       // Simulate downstream failure and verify all-or-nothing hard-delete compensation
       await scope.get('eventBus').publish([
         {

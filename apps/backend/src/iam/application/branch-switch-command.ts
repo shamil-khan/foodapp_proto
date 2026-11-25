@@ -1,6 +1,4 @@
-// FILE: apps/backend/src/iam/application/branch-switch-command.ts (Part 1 of 2)
 import {
-  type Pool,
   RestaurantBranchTable,
   RestaurantStaffTable,
   RestaurantTable,
@@ -8,6 +6,7 @@ import {
   StaffRoleTable,
   sqlSelect,
   type TenantRole,
+  type UnitOfWork,
 } from '@foodapp/db';
 import type { RequestContext } from '@/core/application/authorization';
 import type { Command, CommandHandler } from '@/core/application/cqrs';
@@ -22,12 +21,12 @@ export interface SwitchPosBranchCommand extends Command<Result<PosStaffSessionCl
 export class SwitchPosBranchHandler
   implements CommandHandler<SwitchPosBranchCommand, Result<PosStaffSessionClaims>>
 {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
   private readonly rolePermissionCache: RolePermissionCache;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, rolePermissionCache: RolePermissionCache, request: RequestContext) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork, rolePermissionCache: RolePermissionCache, request: RequestContext) {
+    this.uow = uow;
     this.rolePermissionCache = rolePermissionCache;
     this.request = request;
   }
@@ -49,7 +48,7 @@ export class SwitchPosBranchHandler
       .whereEq(sCols.id, this.request.actorId)
       .activeOnly()
       .compile();
-    const staff = (await this.pool.query<typeof sQ._result>(sQ.text, sQ.params)).rows[0];
+    const staff = await this.uow.queryOne(sQ);
     if (!staff) return err(new DomainError('UNAUTHORIZED', 'Staff record not found.', 401));
 
     const rCols = RestaurantTable.cols;
@@ -60,8 +59,8 @@ export class SwitchPosBranchHandler
       .whereEq(rCols.id, staff.restaurantId)
       .activeOnly()
       .compile();
-    const brandHandle =
-      (await this.pool.query<typeof rQ._result>(rQ.text, rQ.params)).rows[0]?.handle ?? '';
+    const brandRow = await this.uow.queryOne(rQ);
+    const brandHandle = brandRow?.handle ?? '';
 
     const aCols = StaffBranchAssignmentTable.cols;
     const aQ = sqlSelect(StaffBranchAssignmentTable)
@@ -73,7 +72,7 @@ export class SwitchPosBranchHandler
       .whereEq(aCols.staffId, staff.id)
       .activeOnly()
       .compile();
-    const assignments = (await this.pool.query<typeof aQ._result>(aQ.text, aQ.params)).rows;
+    const assignments = await this.uow.queryMany(aQ);
     const targetAssign = assignments.find((a) => a.branchId === cmd.targetBranchId);
     if (!targetAssign) {
       return err(
@@ -84,7 +83,7 @@ export class SwitchPosBranchHandler
         ),
       );
     }
-    // FILE: apps/backend/src/iam/application/branch-switch-command.ts (Part 2 of 2)
+
     const bCols = RestaurantBranchTable.cols;
     const bQ = sqlSelect(RestaurantBranchTable)
       .select([
@@ -100,7 +99,7 @@ export class SwitchPosBranchHandler
       )
       .activeOnly()
       .compile();
-    const branches = (await this.pool.query<typeof bQ._result>(bQ.text, bQ.params)).rows;
+    const branches = await this.uow.queryMany(bQ);
     const branchMap = new Map(
       branches.map((b) => [
         b.id,
@@ -122,7 +121,7 @@ export class SwitchPosBranchHandler
       )
       .activeOnly()
       .compile();
-    const roleRows = (await this.pool.query<typeof srQ._result>(srQ.text, srQ.params)).rows;
+    const roleRows = await this.uow.queryMany(srQ);
     const roleMap = new Map(
       roleRows.map((r) => [
         r.id,

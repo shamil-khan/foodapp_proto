@@ -1,34 +1,29 @@
 import {
   AggregateMementoTable,
+  type DbExecutor,
   DomainEventStoreTable,
-  type Pool,
-  type PoolClient,
   sqlInsert,
   sqlSelect,
+  type UnitOfWork,
 } from '@foodapp/db';
 import type { DomainEvent, EventMetadata } from '@/core/domain/domain-event';
 import type { Memento } from '@/core/domain/memento';
 
 export class PgEventStore {
-  private readonly pool: Pool;
+  private readonly uow: UnitOfWork;
 
-  constructor(pool: Pool) {
-    this.pool = pool;
+  constructor(uow: UnitOfWork) {
+    this.uow = uow;
   }
 
   async appendEvents(
     events: readonly DomainEvent<unknown>[],
     memento?: Memento<unknown>,
-    externalClient?: PoolClient,
+    externalTx?: DbExecutor,
   ): Promise<void> {
     if (events.length === 0) return;
 
-    const client = externalClient ?? (await this.pool.connect());
-    const manageTx = !externalClient;
-
-    try {
-      if (manageTx) await client.query('BEGIN');
-
+    const writeWith = async (tx: DbExecutor): Promise<void> => {
       for (const event of events) {
         const insertEvent = sqlInsert(DomainEventStoreTable)
           .values({
@@ -44,7 +39,7 @@ export class PgEventStore {
           })
           .compile();
 
-        await client.query(insertEvent.text, insertEvent.params);
+        await tx.execute(insertEvent);
       }
 
       if (memento) {
@@ -65,16 +60,16 @@ export class PgEventStore {
           ])
           .compile();
 
-        await client.query(insertMemento.text, insertMemento.params);
+        await tx.execute(insertMemento);
       }
+    };
 
-      if (manageTx) await client.query('COMMIT');
-    } catch (error) {
-      if (manageTx) await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      if (manageTx) client.release();
+    if (externalTx) {
+      await writeWith(externalTx);
+      return;
     }
+
+    await this.uow.transaction(writeWith);
   }
 
   async loadStream<TState>(aggregateId: string): Promise<{
@@ -95,12 +90,7 @@ export class PgEventStore {
       .take(1)
       .compile();
 
-    const mementoRes = await this.pool.query<typeof mementoQuery._result>(
-      mementoQuery.text,
-      mementoQuery.params,
-    );
-
-    const latestMemento = mementoRes.rows[0];
+    const latestMemento = await this.uow.queryOne(mementoQuery);
     const fromVersion = latestMemento ? latestMemento.version : 0;
 
     const eCols = DomainEventStoreTable.cols;
@@ -120,10 +110,7 @@ export class PgEventStore {
       .orderBy(eCols.version, 'ASC')
       .compile();
 
-    const eventsRes = await this.pool.query<typeof eventsQuery._result>(
-      eventsQuery.text,
-      eventsQuery.params,
-    );
+    const eventRows = await this.uow.queryMany(eventsQuery);
 
     return {
       memento: latestMemento
@@ -135,7 +122,7 @@ export class PgEventStore {
             createdAt: latestMemento.createdAt,
           }
         : undefined,
-      events: eventsRes.rows.map((row) => ({
+      events: eventRows.map((row) => ({
         eventId: row.id,
         aggregateId: row.aggregateId,
         aggregateType: row.aggregateType,

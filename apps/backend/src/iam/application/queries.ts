@@ -1,7 +1,7 @@
-// FILE: apps/backend/src/iam/application/queries.ts
-import { type Pool, RestaurantStaffTable, sqlSelect, UserTable } from '@foodapp/db';
+import { RestaurantStaffTable, sqlSelect, UserTable } from '@foodapp/db';
 import type { RequestContext } from '@/container';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
+import type { ReadRepository } from '@/core/infrastructure/read-repository';
 
 export interface ActiveActorProfileDto {
   id: string;
@@ -18,11 +18,11 @@ export interface GetCurrentActorQuery extends Query<ActiveActorProfileDto | null
 export class GetCurrentActorHandler
   implements QueryHandler<GetCurrentActorQuery, ActiveActorProfileDto | null>
 {
-  private readonly pool: Pool;
+  private readonly readRepo: ReadRepository;
   private readonly request: RequestContext;
 
-  constructor(pool: Pool, request: RequestContext) {
-    this.pool = pool;
+  constructor(readRepo: ReadRepository, request: RequestContext) {
+    this.readRepo = readRepo;
     this.request = request;
   }
 
@@ -41,8 +41,7 @@ export class GetCurrentActorHandler
         .activeOnly()
         .compile();
 
-      const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
-      const staff = rows[0];
+      const staff = await this.readRepo.findOne(q);
       if (!staff) return null;
 
       return {
@@ -69,8 +68,7 @@ export class GetCurrentActorHandler
         .activeOnly()
         .compile();
 
-      const { rows } = await this.pool.query<typeof q._result>(q.text, q.params);
-      const user = rows[0];
+      const user = await this.readRepo.findOne(q);
       if (!user) return null;
 
       return {

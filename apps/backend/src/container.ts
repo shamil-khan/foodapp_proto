@@ -1,5 +1,12 @@
-// FILE: apps/backend/src/container.ts (Complete Imports — Part 1 of 2)
-import { ALL_PERMISSIONS, type Pool, pgPool, redisClient, SYSTEM_ACTORS } from '@foodapp/db';
+import {
+  ALL_PERMISSIONS,
+  type DbReader,
+  dbReader,
+  redisClient,
+  SYSTEM_ACTORS,
+  type UnitOfWork,
+  unitOfWork,
+} from '@foodapp/db';
 import type { InferdiHonoScopeEnv } from '@inferdi/hono';
 import {
   Container,
@@ -60,8 +67,8 @@ import {
 import { type EventBus, InMemoryEventBus } from '@/core/application/event-bus';
 import { PgEventStore } from '@/core/infrastructure/pg-event-store';
 import { PgSagaRepository } from '@/core/infrastructure/pg-saga-repository';
+import { ReadRepository } from '@/core/infrastructure/read-repository';
 import { RedisIdempotencyStore } from '@/core/services/idempotency-middleware';
-// FILE: apps/backend/src/container.ts (Complete Imports — Part 2 of 2)
 import { SwitchPosBranchHandler } from '@/iam/application/branch-switch-command';
 import { BrandIamOnboardingHandler } from '@/iam/application/brand-onboarding-handlers';
 import { LoginPosStaffHandler } from '@/iam/application/pos-login-command';
@@ -127,7 +134,10 @@ export const DI_TOKENS = {
   CORE: {
     REQUEST: 'request',
     LOG: 'log',
-    DB: 'db',
+    // Split CQRS database handles: read-only DbReader/ReadRepository vs. transactional UnitOfWork
+    READ_DB: 'readDb',
+    UOW: 'uow',
+    READ_REPO: 'readRepo',
     REDIS: 'redis',
     EVENT_BUS: 'eventBus',
     EVENT_STORE: 'eventStore',
@@ -138,8 +148,6 @@ export const DI_TOKENS = {
     COMMAND_BUS: 'commandBus',
     QUERY_BUS: 'queryBus',
   },
-
-  // FILE: apps/backend/src/container.ts (DI_TOKENS.IAM, DI_TOKENS.BRAND, DI_TOKENS.CATALOG)
   IAM: {
     ROLE_PERMISSION_CACHE: 'rolePermissionCache',
     BRAND_ONBOARDING_HANDLER: 'brandIamOnboardingHandler',
@@ -240,7 +248,9 @@ type CoreDeps = ScopeInputMap<{
   request: RequestContext;
   log: AppLogger;
 }> & {
-  db: Spec<Pool, 'singleton'>;
+  readDb: Spec<DbReader, 'singleton'>;
+  uow: Spec<UnitOfWork, 'singleton'>;
+  readRepo: Spec<ReadRepository, 'singleton'>;
   redis: Spec<RedisClientType, 'singleton'>;
   eventBus: Spec<EventBus, 'singleton'>;
   eventStore: Spec<PgEventStore, 'singleton'>;
@@ -258,7 +268,16 @@ const coreContainer: Container<CoreDeps> = new Container()
     request: RequestContext;
     log: AppLogger;
   }>()
-  .registerValue(DI_TOKENS.CORE.DB, pgPool)
+  .registerValue(DI_TOKENS.CORE.READ_DB, dbReader)
+  .registerValue(DI_TOKENS.CORE.UOW, unitOfWork)
+  .registerClass(
+    DI_TOKENS.CORE.READ_REPO,
+    ReadRepository,
+    [
+      DI_TOKENS.CORE.READ_DB,
+    ],
+    'singleton',
+  )
   .registerValue(DI_TOKENS.CORE.REDIS, redisClient)
   // Domain Event Bus (pub/sub for async DomainEvents; separate from request-scoped CQRS CommandBus & QueryBus).
   .registerValue<typeof DI_TOKENS.CORE.EVENT_BUS, EventBus>(DI_TOKENS.CORE.EVENT_BUS, eventBus)
@@ -268,7 +287,7 @@ const coreContainer: Container<CoreDeps> = new Container()
     DI_TOKENS.CORE.EVENT_STORE,
     PgEventStore,
     [
-      DI_TOKENS.CORE.DB,
+      DI_TOKENS.CORE.UOW,
     ],
     'singleton',
   )
@@ -276,7 +295,7 @@ const coreContainer: Container<CoreDeps> = new Container()
     DI_TOKENS.CORE.SAGA_REPO,
     PgSagaRepository,
     [
-      DI_TOKENS.CORE.DB,
+      DI_TOKENS.CORE.UOW,
     ],
     'singleton',
   )
@@ -364,7 +383,6 @@ function defineBoundedContext<
 // handlers, and async domain event subscribers in one self-contained block.
 // ============================================================================
 
-// FILE: apps/backend/src/container.ts (brandModule — Part 1 of 3)
 // Declaring Brand bounded context:
 // Manages brand registration, multi-branch provisioning, daily operational status,
 // home-kitchen address privacy, and all-or-nothing `BrandOnboardingSaga` coordination.
@@ -421,7 +439,6 @@ const brandModule = defineBoundedContext<BrandProvides>({
     DI_TOKENS.BRAND.RESOLVE_BRAND_BY_HANDLE_HANDLER,
     DI_TOKENS.BRAND.RESOLVE_BRANCH_BY_SLUG_HANDLER,
   ],
-  // FILE: apps/backend/src/container.ts (brandModule — Part 2 of 3)
   module: (container) =>
     container
       .registerClass(
@@ -436,7 +453,7 @@ const brandModule = defineBoundedContext<BrandProvides>({
         DI_TOKENS.BRAND.ONBOARDING_SAGA,
         BrandOnboardingSaga,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_BUS,
           DI_TOKENS.CORE.SAGA_REPO,
         ],
@@ -446,7 +463,7 @@ const brandModule = defineBoundedContext<BrandProvides>({
         DI_TOKENS.BRAND.LIST_BRANDS_HANDLER,
         ListBrandsHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.READ_REPO,
         ],
         'singleton',
       )
@@ -454,7 +471,7 @@ const brandModule = defineBoundedContext<BrandProvides>({
         DI_TOKENS.BRAND.RESOLVE_BRAND_BY_HANDLE_HANDLER,
         ResolveBrandByHandleHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.READ_REPO,
           DI_TOKENS.BRAND.BRANCH_STATUS_CACHE,
           DI_TOKENS.CORE.REQUEST,
         ],
@@ -464,7 +481,7 @@ const brandModule = defineBoundedContext<BrandProvides>({
         DI_TOKENS.BRAND.RESOLVE_BRANCH_BY_SLUG_HANDLER,
         ResolveBranchBySlugHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.READ_REPO,
           DI_TOKENS.BRAND.BRANCH_STATUS_CACHE,
           DI_TOKENS.CORE.REQUEST,
         ],
@@ -474,7 +491,7 @@ const brandModule = defineBoundedContext<BrandProvides>({
         DI_TOKENS.BRAND.REGISTER_BRAND_HANDLER,
         RegisterBrandHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_BUS,
           DI_TOKENS.CORE.REQUEST,
         ],
@@ -484,19 +501,18 @@ const brandModule = defineBoundedContext<BrandProvides>({
         DI_TOKENS.BRAND.CREATE_BRAND_BRANCH_HANDLER,
         CreateBrandBranchHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_BUS,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
         'scoped',
       )
-      // FILE: apps/backend/src/container.ts (brandModule — Part 3 of 3)
       .registerClass(
         DI_TOKENS.BRAND.UPDATE_BRANCH_STATUS_HANDLER,
         UpdateBranchOperationalStatusHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.BRAND.BRANCH_STATUS_CACHE,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
@@ -507,7 +523,7 @@ const brandModule = defineBoundedContext<BrandProvides>({
         DI_TOKENS.BRAND.UPDATE_BRANCH_SETTINGS_HANDLER,
         UpdateBranchSettingsHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_BUS,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
@@ -518,7 +534,7 @@ const brandModule = defineBoundedContext<BrandProvides>({
         DI_TOKENS.BRAND.REVIEW_TAKEAWAY_WHITELIST_HANDLER,
         ReviewTakeawayWhitelistHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
@@ -528,7 +544,7 @@ const brandModule = defineBoundedContext<BrandProvides>({
         DI_TOKENS.BRAND.CREATE_RESTAURANT_BY_ADMIN_HANDLER,
         CreateRestaurantByAdminHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_BUS,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
@@ -539,7 +555,7 @@ const brandModule = defineBoundedContext<BrandProvides>({
         DI_TOKENS.BRAND.UPDATE_RESTAURANT_STATUS_BY_ADMIN_HANDLER,
         UpdateRestaurantStatusByAdminHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
@@ -645,7 +661,7 @@ const iamModule = defineBoundedContext<IamProvides>({
         DI_TOKENS.IAM.ROLE_PERMISSION_CACHE,
         RolePermissionCache,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.READ_REPO,
           DI_TOKENS.CORE.REDIS,
         ],
         'singleton',
@@ -654,7 +670,7 @@ const iamModule = defineBoundedContext<IamProvides>({
         DI_TOKENS.IAM.LOGIN_POS_STAFF_HANDLER,
         LoginPosStaffHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.IAM.ROLE_PERMISSION_CACHE,
         ],
         'singleton',
@@ -663,7 +679,7 @@ const iamModule = defineBoundedContext<IamProvides>({
         DI_TOKENS.IAM.SWITCH_POS_BRANCH_HANDLER,
         SwitchPosBranchHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.IAM.ROLE_PERMISSION_CACHE,
           DI_TOKENS.CORE.REQUEST,
         ],
@@ -679,7 +695,7 @@ const iamModule = defineBoundedContext<IamProvides>({
         DI_TOKENS.IAM.GET_CURRENT_ACTOR_HANDLER,
         GetCurrentActorHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.READ_REPO,
           DI_TOKENS.CORE.REQUEST,
         ],
         'scoped',
@@ -688,7 +704,7 @@ const iamModule = defineBoundedContext<IamProvides>({
         DI_TOKENS.IAM.GET_RESTAURANT_STAFF_ROLES_HANDLER,
         GetRestaurantStaffRolesHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.READ_REPO,
           DI_TOKENS.CORE.AUTHZ,
         ],
         'scoped',
@@ -697,7 +713,7 @@ const iamModule = defineBoundedContext<IamProvides>({
         DI_TOKENS.IAM.CREATE_STAFF_ROLE_HANDLER,
         CreateStaffRoleHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
@@ -707,7 +723,7 @@ const iamModule = defineBoundedContext<IamProvides>({
         DI_TOKENS.IAM.UPDATE_STAFF_ROLE_HANDLER,
         UpdateStaffRoleHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.IAM.ROLE_PERMISSION_CACHE,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
@@ -718,7 +734,7 @@ const iamModule = defineBoundedContext<IamProvides>({
         DI_TOKENS.IAM.DELETE_STAFF_ROLE_HANDLER,
         DeleteStaffRoleHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.IAM.ROLE_PERMISSION_CACHE,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
@@ -729,7 +745,7 @@ const iamModule = defineBoundedContext<IamProvides>({
         DI_TOKENS.IAM.ASSIGN_STAFF_BRANCH_ACCESS_HANDLER,
         AssignStaffBranchAccessHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.IAM.ROLE_PERMISSION_CACHE,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
@@ -740,7 +756,7 @@ const iamModule = defineBoundedContext<IamProvides>({
         DI_TOKENS.IAM.BRAND_ONBOARDING_HANDLER,
         BrandIamOnboardingHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_BUS,
         ],
         'singleton',
@@ -831,7 +847,7 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
         DI_TOKENS.CATALOG.REPO,
         CatalogRepository,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
         ],
         'singleton',
       )
@@ -839,7 +855,7 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
         DI_TOKENS.CATALOG.BRAND_ONBOARDING_HANDLER,
         BrandCatalogOnboardingHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_BUS,
         ],
         'singleton',
@@ -848,7 +864,7 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
         DI_TOKENS.CATALOG.BRANCH_SYNC_SAGA,
         BranchCatalogSyncSaga,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CATALOG.REPO,
           DI_TOKENS.CORE.REDIS,
           DI_TOKENS.CORE.SAGA_REPO,
@@ -864,12 +880,11 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
         ],
         'singleton',
       )
-      // FILE: apps/backend/src/container.ts (catalogModule — Part 2 of 2)
       .registerClass(
         DI_TOKENS.CATALOG.UPSERT_PRICING_POLICY_HANDLER,
         UpsertPricingPolicyHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
@@ -879,7 +894,7 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
         DI_TOKENS.CATALOG.UPSERT_BRANCH_MENU_OVERRIDE_HANDLER,
         UpsertBranchMenuOverrideHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_BUS,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
@@ -890,7 +905,7 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
         DI_TOKENS.CATALOG.REVIEW_PRICE_OVERRIDE_HANDLER,
         ReviewPriceOverrideHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_BUS,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
@@ -901,7 +916,7 @@ const catalogModule = defineBoundedContext<CatalogProvides>({
         DI_TOKENS.CATALOG.CREATE_MENU_ITEM_HANDLER,
         CreateMenuItemHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_BUS,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
@@ -990,7 +1005,7 @@ const supportModule = defineBoundedContext<SupportProvides>({
         DI_TOKENS.SUPPORT.REPO,
         SupportTicketRepository,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.REQUEST,
         ],
         'scoped',
@@ -1086,7 +1101,7 @@ const loyaltyModule = defineBoundedContext<LoyaltyProvides>({
         DI_TOKENS.LOYALTY.REPO,
         LoyaltyRepository,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.REQUEST,
         ],
         'scoped',
@@ -1095,7 +1110,7 @@ const loyaltyModule = defineBoundedContext<LoyaltyProvides>({
         DI_TOKENS.LOYALTY.SETTLEMENT_SERVICE,
         LoyaltySettlementService,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.LOYALTY.REPO,
           DI_TOKENS.CORE.CLOCK,
         ],
@@ -1105,7 +1120,7 @@ const loyaltyModule = defineBoundedContext<LoyaltyProvides>({
         DI_TOKENS.LOYALTY.EVENT_HANDLER,
         LoyaltySettlementEventHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.LOYALTY.SETTLEMENT_SERVICE,
           DI_TOKENS.CORE.EVENT_BUS,
         ],
@@ -1115,7 +1130,7 @@ const loyaltyModule = defineBoundedContext<LoyaltyProvides>({
         DI_TOKENS.LOYALTY.GET_CUSTOMER_LOYALTY_HANDLER,
         GetCustomerLoyaltyHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.READ_REPO,
           DI_TOKENS.LOYALTY.REPO,
           DI_TOKENS.CORE.AUTHZ,
         ],
@@ -1125,7 +1140,7 @@ const loyaltyModule = defineBoundedContext<LoyaltyProvides>({
         DI_TOKENS.LOYALTY.UPDATE_GOVERNANCE_HANDLER,
         UpdateLoyaltyGovernanceHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
@@ -1135,7 +1150,7 @@ const loyaltyModule = defineBoundedContext<LoyaltyProvides>({
         DI_TOKENS.LOYALTY.AUDIT_ENTRY_HANDLER,
         AuditLoyaltyEntryHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.LOYALTY.REPO,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
@@ -1196,7 +1211,7 @@ const billingModule = defineBoundedContext<BillingProvides>({
         DI_TOKENS.BILLING.REPO,
         BillingRepository,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.REQUEST,
         ],
         'scoped',
@@ -1207,7 +1222,7 @@ const billingModule = defineBoundedContext<BillingProvides>({
         DI_TOKENS.BILLING.SETTLEMENT_SERVICE,
         BillingSettlementService,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.BILLING.REPO,
           DI_TOKENS.CORE.EVENT_BUS,
         ],
@@ -1217,7 +1232,7 @@ const billingModule = defineBoundedContext<BillingProvides>({
         DI_TOKENS.BILLING.EVENT_HANDLER,
         BillingSettlementEventHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.BILLING.SETTLEMENT_SERVICE,
         ],
         'scoped',
@@ -1226,7 +1241,7 @@ const billingModule = defineBoundedContext<BillingProvides>({
         DI_TOKENS.BILLING.GET_RESTAURANT_BILLING_HANDLER,
         GetRestaurantBillingHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.READ_REPO,
           DI_TOKENS.BILLING.REPO,
           DI_TOKENS.CORE.AUTHZ,
         ],
@@ -1236,7 +1251,7 @@ const billingModule = defineBoundedContext<BillingProvides>({
         DI_TOKENS.BILLING.REFUND_ORDER_HANDLER,
         RefundOrderHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.BILLING.REPO,
           DI_TOKENS.BILLING.GATEWAY,
           DI_TOKENS.CORE.AUTHZ,
@@ -1248,7 +1263,7 @@ const billingModule = defineBoundedContext<BillingProvides>({
         DI_TOKENS.BILLING.SETTLE_MERCHANT_HANDLER,
         SettleMerchantHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.BILLING.REPO,
           DI_TOKENS.CORE.EVENT_BUS,
           DI_TOKENS.CORE.AUTHZ,
@@ -1328,7 +1343,7 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
         DI_TOKENS.ORDERS.REPO,
         OrderRepository,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_STORE,
           DI_TOKENS.CORE.EVENT_BUS,
           DI_TOKENS.CORE.REQUEST,
@@ -1350,6 +1365,7 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
         DI_TOKENS.ORDERS.ORDER_SAGA,
         OrderSettlementSaga,
         [
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_BUS,
           DI_TOKENS.CORE.SAGA_REPO,
           DI_TOKENS.ORDERS.NOTIFIER,
@@ -1360,6 +1376,7 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
         DI_TOKENS.ORDERS.CHECKOUT_SAGA,
         OrderCheckoutSaga,
         [
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.CORE.EVENT_BUS,
           DI_TOKENS.CORE.SAGA_REPO,
           DI_TOKENS.ORDERS.REPO,
@@ -1370,7 +1387,7 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
         DI_TOKENS.ORDERS.PREVIEW_ORDER_HANDLER,
         PreviewOrderHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.READ_REPO,
         ],
         'singleton',
       )
@@ -1378,7 +1395,7 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
         DI_TOKENS.ORDERS.CHECKOUT_ORDER_HANDLER,
         CheckoutOrderHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.ORDERS.REPO,
           DI_TOKENS.ORDERS.CART_SERVICE,
           DI_TOKENS.ORDERS.GATEWAY,
@@ -1390,7 +1407,7 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
         DI_TOKENS.ORDERS.PLACE_ORDER_HANDLER,
         PlacePosOrderHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.ORDERS.REPO,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
@@ -1401,7 +1418,7 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
         DI_TOKENS.ORDERS.TRANSITION_ORDER_HANDLER,
         TransitionOrderStatusHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.ORDERS.REPO,
           DI_TOKENS.ORDERS.DELIVERY_PROVIDER,
           DI_TOKENS.CORE.AUTHZ,
@@ -1423,7 +1440,7 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
         DI_TOKENS.ORDERS.SYNC_POS_ORDERS_HANDLER,
         SyncPosOrdersHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.UOW,
           DI_TOKENS.ORDERS.REPO,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
@@ -1434,7 +1451,7 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
         DI_TOKENS.ORDERS.GET_ORDERS_HANDLER,
         GetRestaurantOrdersHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.READ_REPO,
           DI_TOKENS.CORE.AUTHZ,
         ],
         'scoped',
@@ -1443,7 +1460,7 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
         DI_TOKENS.ORDERS.GET_ORDER_BY_ID_HANDLER,
         GetOrderByIdHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.READ_REPO,
           DI_TOKENS.CORE.AUTHZ,
           DI_TOKENS.CORE.REQUEST,
         ],
@@ -1453,7 +1470,7 @@ const ordersModule = defineBoundedContext<OrdersProvides>({
         DI_TOKENS.ORDERS.GET_ORDER_EVENTS_SINCE_HANDLER,
         GetOrderEventsSinceHandler,
         [
-          DI_TOKENS.CORE.DB,
+          DI_TOKENS.CORE.READ_REPO,
         ],
         'singleton',
       ),
@@ -1629,12 +1646,12 @@ export const rootContainer = domainContainer
     ],
     'scoped',
   );
-
-// FILE: apps/backend/src/container.ts (ScopeServices)
 export interface ScopeServices {
   request: RequestContext;
   log: AppLogger;
-  db: Pool;
+  readDb: DbReader;
+  uow: UnitOfWork;
+  readRepo: ReadRepository;
   redis: RedisClientType;
   eventBus: EventBus;
   eventStore: PgEventStore;
