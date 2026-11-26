@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ALL_PERMISSIONS, pgPool, redisClient } from '@foodapp/db';
+import { CUSTOMER_PERMISSIONS, pgPool, redisClient } from '@foodapp/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rootContainer } from '@/container';
 import { AppLogger } from '@/logger';
@@ -22,8 +22,8 @@ describe('checkout.idempotency-saga — Storefront Checkout & OrderSettlementSag
       request: {
         requestId: randomUUID(),
         actorId: customerId,
-        actorSource: 'GLOBAL_USER',
-        permissions: ALL_PERMISSIONS,
+        actorSource: 'CUSTOMER',
+        permissions: CUSTOMER_PERMISSIONS,
       },
       log: new AppLogger('int-checkout-saga'),
     });
@@ -93,8 +93,8 @@ describe('checkout.idempotency-saga — Storefront Checkout & OrderSettlementSag
       request: {
         requestId: randomUUID(),
         actorId: customerId,
-        actorSource: 'GLOBAL_USER',
-        permissions: ALL_PERMISSIONS,
+        actorSource: 'CUSTOMER',
+        permissions: CUSTOMER_PERMISSIONS,
       },
       log: new AppLogger('int-checkout-negative'),
     });

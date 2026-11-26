@@ -1,4 +1,4 @@
-import { type redisClient, SYSTEM_ACTORS } from '@foodapp/db';
+import { ANONYMOUS_ACTOR_ID, type redisClient } from '@foodapp/db';
 import type { CompiledMenuSnapshot } from '@/catalog/domain/menu-snapshot-builder';
 import type { CatalogRepository } from '@/catalog/infrastructure/catalog-repository';
 import type { Query, QueryHandler } from '@/core/application/cqrs';
@@ -34,9 +34,10 @@ export class GetBranchMenuSnapshotHandler
     } else {
       snapshot = await this.catalogRepo.getPersistedSnapshot(query.branchId);
       if (!snapshot) {
+        // Lazy public storefront cache warm-up executes under ANONYMOUS_ACTOR_ID
         snapshot = await this.catalogRepo.rebuildAndPersistSnapshot(
           query.branchId,
-          SYSTEM_ACTORS.SYSTEM_CRON,
+          ANONYMOUS_ACTOR_ID,
         );
       }
       if (snapshot) {

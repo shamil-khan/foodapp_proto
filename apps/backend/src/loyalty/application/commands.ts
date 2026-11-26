@@ -5,6 +5,7 @@ import {
   sqlSelect,
   sqlUpdate,
   type UnitOfWork,
+  UserTable,
 } from '@foodapp/db';
 import type Decimal from 'decimal.js';
 import type { AuthorizationPolicy, RequestContext } from '@/core/application/authorization';
@@ -260,10 +261,36 @@ export class LoyaltySettlementService implements LoyaltySettlementPort {
           offsetGbp: roundGbp(0),
         };
       }
+
       const offsetGbp = roundGbp(policy.gbpPerPoint.mul(pointsToRedeem));
+      const uCols = UserTable.cols;
+      const actorUser = await tx.queryOne(
+        sqlSelect(UserTable)
+          .select([
+            uCols.id,
+          ])
+          .whereEq(uCols.id, params.actorId)
+          .take(1)
+          .compile(),
+      );
+      const ledgerUserId =
+        actorUser?.id ??
+        (
+          await tx.queryOne(
+            sqlSelect(UserTable)
+              .select([
+                uCols.id,
+              ])
+              .activeOnly()
+              .take(1)
+              .compile(),
+          )
+        )?.id ??
+        params.actorId;
+
       await this.repo.appendEntry(
         {
-          userId: params.actorId,
+          userId: ledgerUserId,
           holderType: 'MERCHANT',
           holderId: params.restaurantId,
           issuerScope: 'PLATFORM',
@@ -276,6 +303,7 @@ export class LoyaltySettlementService implements LoyaltySettlementPort {
         },
         tx,
       );
+
       return {
         pointsRedeemed: pointsToRedeem,
         offsetGbp,

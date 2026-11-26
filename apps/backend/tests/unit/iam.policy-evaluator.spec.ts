@@ -44,17 +44,15 @@ describe('iam.policy-evaluator — Role + Direct ALLOW/DENY Precedence & Actor I
     expect(effective).not.toContain('orders:comp:waive');
   });
 
-  it('isolates PLATFORM_ADMIN from customer and unapproved tenant operations', () => {
+  it('isolates PLATFORM_STAFF from customer and unapproved tenant operations', () => {
     const adminPerms = resolveDefaultPermissionsForActor({
-      actorSource: 'GLOBAL_USER',
-      globalRole: 'PLATFORM_ADMIN',
+      actorSource: 'PLATFORM_STAFF',
     });
 
     const policy = new AuthorizationPolicy({
       requestId: 'req-admin-1',
       actorId: 'admin-1',
-      actorSource: 'GLOBAL_USER',
-      globalRole: 'PLATFORM_ADMIN',
+      actorSource: 'PLATFORM_STAFF',
       permissions: adminPerms,
     });
 
@@ -62,5 +60,68 @@ describe('iam.policy-evaluator — Role + Direct ALLOW/DENY Precedence & Actor I
     expect(policy.hasPermission('storefront:orders:place')).toBe(false);
     expect(policy.hasPermission('orders:place')).toBe(false);
     expect(policy.assertBranchAccess('branch-1', 'branch:status:manage').ok).toBe(false);
+  });
+
+  it('never leaks wildcard ALL_PERMISSIONS on ANONYMOUS defaults and strips non-tenant rights from POS tokens', async () => {
+    const { Hono } = await import('hono');
+    const { PosTokenService } = await import('@/iam/infrastructure/pos-token-service');
+    const { sign } = await import('hono/jwt');
+
+    const dbExports = await import('@foodapp/db');
+    expect('ALL_PERMISSIONS' in dbExports).toBe(false);
+    expect('SYSTEM_ACTORS' in dbExports).toBe(false);
+
+    const anonymousDefaults = resolveDefaultPermissionsForActor({
+      actorSource: 'ANONYMOUS',
+    });
+    expect(anonymousDefaults).toEqual([]);
+
+    const forgedJwt = await sign(
+      {
+        staffId: 'staff-1',
+        restaurantId: 'rest-1',
+        brandHandle: 'pizza-hut',
+        activeBranchId: 'branch-1',
+        activeBranchKey: 'clifton',
+        roleId: 'role-1',
+        role: 'OWNER',
+        name: 'Tom',
+        email: 'tom@pizza-hut.com',
+        permissions: [
+          'orders:read',
+          'platform:restaurants:manage',
+          'storefront:orders:place',
+          '*',
+        ],
+        assignedBranches: [],
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      },
+      process.env.BETTER_AUTH_SECRET ?? 'dev_pos_secret_change_in_prod',
+      'HS256',
+    );
+
+    const svc = new PosTokenService();
+    const testApp = new Hono();
+    testApp.get('/check', async (c) => {
+      const claims = await svc.verifyRequestToken(c);
+      return c.json({
+        permissions: claims?.permissions ?? [],
+      });
+    });
+
+    const res = await testApp.request('/check', {
+      headers: {
+        Authorization: `Bearer ${forgedJwt}`,
+      },
+    });
+    const body = (await res.json()) as {
+      permissions: string[];
+    };
+
+    expect(body.permissions).toEqual([
+      'orders:read',
+    ]);
+    expect(body.permissions).not.toContain('platform:restaurants:manage');
+    expect(body.permissions).not.toContain('storefront:orders:place');
   });
 });

@@ -5,7 +5,6 @@ import {
   type Pool,
   type PoolClient,
   RestaurantTable,
-  SYSTEM_ACTORS,
   type UnitOfWork,
 } from '@foodapp/db';
 import Decimal from 'decimal.js';
@@ -155,11 +154,16 @@ describe('shared.unit-of-work-read-repo — UnitOfWork, ReadRepository & Post-Co
       unsubscribe: () => {},
     };
 
+    const staffActorId = 'c0000000-0000-4000-8000-000000000007';
     const repo = new OrderRepository(uow, eventStore, eventBus, {
       requestId: 'req-uow-1',
-      actorId: SYSTEM_ACTORS.SYSTEM_CRON,
-      actorSource: 'SYSTEM',
-      permissions: [],
+      actorId: staffActorId,
+      actorSource: 'POS_STAFF',
+      restaurantId: 'rest-1',
+      branchId: 'branch-1',
+      permissions: [
+        'orders:place',
+      ],
     });
 
     const aggRes = OrderAggregate.createOrder(
@@ -187,7 +191,7 @@ describe('shared.unit-of-work-read-repo — UnitOfWork, ReadRepository & Post-Co
       },
       {
         requestId: 'req-uow-1',
-        actorId: SYSTEM_ACTORS.SYSTEM_CRON,
+        actorId: staffActorId,
         restaurantId: 'rest-1',
       },
     );

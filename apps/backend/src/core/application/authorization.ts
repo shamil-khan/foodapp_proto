@@ -1,16 +1,14 @@
 import {
-  ALL_PERMISSIONS,
   CUSTOMER_PERMISSIONS,
   type Permission,
   PLATFORM_ADMIN_PERMISSIONS,
-  type PlatformRole,
   type PlatformSupportScope,
   type TenantRole,
 } from '@foodapp/db';
 import { DomainError, err, ok, type Result } from '@/core/domain/result';
 import { CompositeSpecification } from '@/core/patterns/specification';
 
-export type ActorSource = 'GLOBAL_USER' | 'POS_STAFF' | 'SYSTEM';
+export type ActorSource = 'ANONYMOUS' | 'CUSTOMER' | 'POS_STAFF' | 'PLATFORM_STAFF';
 
 export interface ActiveSupportGrant {
   readonly ticketId: string;
@@ -27,7 +25,6 @@ export type RequestContext = {
   restaurantId?: string;
   branchId?: string;
   roleId?: string;
-  globalRole?: PlatformRole;
   tenantRole?: TenantRole;
   permissions: readonly Permission[];
   supportGrant?: ActiveSupportGrant;
@@ -35,27 +32,22 @@ export type RequestContext = {
 
 export function resolveDefaultPermissionsForActor(params: {
   actorSource: ActorSource;
-  globalRole?: PlatformRole;
   resolvedTenantPermissions?: readonly Permission[];
 }): readonly Permission[] {
-  if (params.actorSource === 'SYSTEM') {
+  if (params.actorSource === 'ANONYMOUS') {
+    return [];
+  }
+
+  if (params.actorSource === 'PLATFORM_STAFF') {
     return [
-      ...ALL_PERMISSIONS,
+      ...PLATFORM_ADMIN_PERMISSIONS,
     ];
   }
 
-  if (params.actorSource === 'GLOBAL_USER') {
-    if (params.globalRole === 'PLATFORM_ADMIN') {
-      return [
-        ...PLATFORM_ADMIN_PERMISSIONS,
-      ];
-    }
-    if (params.globalRole === 'CUSTOMER') {
-      return [
-        ...CUSTOMER_PERMISSIONS,
-      ];
-    }
-    return [];
+  if (params.actorSource === 'CUSTOMER') {
+    return [
+      ...CUSTOMER_PERMISSIONS,
+    ];
   }
 
   return params.resolvedTenantPermissions ?? [];
@@ -75,7 +67,7 @@ export class HasPermissionSpec extends CompositeSpecification<{
     request: RequestContext;
     permission: Permission;
   }): boolean {
-    if (request.actorSource === 'SYSTEM') return true;
+    if (request.actorSource === 'ANONYMOUS') return false;
     return request.permissions.includes(permission);
   }
 }
@@ -94,10 +86,9 @@ export class SameRestaurantSpec extends CompositeSpecification<{
     request: RequestContext;
     targetRestaurantId: string;
   }): boolean {
-    if (request.actorSource === 'SYSTEM') return true;
+    // Platform staff can access tenant resources only via an approved JIT support ticket
     if (
-      request.actorSource === 'GLOBAL_USER' &&
-      request.globalRole === 'PLATFORM_ADMIN' &&
+      request.actorSource === 'PLATFORM_STAFF' &&
       request.supportGrant?.restaurantId === targetRestaurantId
     ) {
       return true;
@@ -117,10 +108,8 @@ export class SameBranchSpec extends CompositeSpecification<{
     request: RequestContext;
     targetBranchId: string;
   }): boolean {
-    if (request.actorSource === 'SYSTEM') return true;
     if (
-      request.actorSource === 'GLOBAL_USER' &&
-      request.globalRole === 'PLATFORM_ADMIN' &&
+      request.actorSource === 'PLATFORM_STAFF' &&
       request.supportGrant &&
       (!request.supportGrant.branchId || request.supportGrant.branchId === targetBranchId)
     ) {
@@ -141,8 +130,8 @@ export class SameUserSpec extends CompositeSpecification<{
     request: RequestContext;
     targetUserId: string;
   }): boolean {
-    if (request.actorSource === 'SYSTEM') return true;
-    return request.actorSource === 'GLOBAL_USER' && request.actorId === targetUserId;
+    // Business logins (POS_STAFF / PLATFORM_STAFF) never act as consumer wallet owners
+    return request.actorSource === 'CUSTOMER' && request.actorId === targetUserId;
   }
 }
 
@@ -157,7 +146,7 @@ export class CanDelegatePermissionsSpec extends CompositeSpecification<{
     request: RequestContext;
     targetPermissions: readonly Permission[];
   }): boolean {
-    if (request.actorSource === 'SYSTEM') return true;
+    if (request.actorSource === 'ANONYMOUS') return false;
     const held = new Set<Permission>(request.permissions);
     return targetPermissions.every((perm) => held.has(perm));
   }
@@ -176,9 +165,7 @@ export class AuthorizationPolicy {
   }
 
   isPlatformAdmin(): boolean {
-    return (
-      this.request.actorSource === 'GLOBAL_USER' && this.request.globalRole === 'PLATFORM_ADMIN'
-    );
+    return this.request.actorSource === 'PLATFORM_STAFF';
   }
 
   hasSupportGrant(scope: PlatformSupportScope, targetRestaurantId?: string): boolean {

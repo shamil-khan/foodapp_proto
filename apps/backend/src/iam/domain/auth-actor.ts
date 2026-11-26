@@ -1,6 +1,6 @@
-import type { Permission, PlatformRole, TenantRole } from '@foodapp/db';
+import type { Permission, TenantRole } from '@foodapp/db';
 
-export type ActorSource = 'GLOBAL_USER' | 'POS_STAFF' | 'SYSTEM';
+export type ActorSource = 'ANONYMOUS' | 'CUSTOMER' | 'POS_STAFF' | 'PLATFORM_STAFF';
 
 export interface StaffAssignedBranchDto {
   readonly branchId: string;
@@ -27,10 +27,16 @@ export interface PosStaffSessionClaims {
   readonly assignedBranches: readonly StaffAssignedBranchDto[];
 }
 
-export interface GlobalUserSessionClaims {
-  readonly userId: string;
+export interface CustomerSessionClaims {
+  readonly customerId: string;
+  readonly phoneNumber: string;
+  readonly name: string;
+  readonly permissions: readonly Permission[];
+}
+
+export interface PlatformStaffSessionClaims {
+  readonly platformStaffId: string;
   readonly email: string;
   readonly name: string;
-  readonly role: PlatformRole;
   readonly permissions: readonly Permission[];
 }

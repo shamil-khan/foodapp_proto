@@ -61,13 +61,22 @@ export class OrderController {
       branchId: string;
     },
   ) {
-    if (this.request.actorSource !== 'GLOBAL_USER') {
+    if (this.request.actorSource === 'ANONYMOUS') {
       return c.json(
         {
           code: 'UNAUTHORIZED',
           error: 'Customer session required',
         },
         401,
+      );
+    }
+    if (this.request.actorSource !== 'CUSTOMER') {
+      return c.json(
+        {
+          code: 'FORBIDDEN',
+          error: 'Business staff accounts cannot manage customer carts',
+        },
+        403,
       );
     }
     const cart = await this.cartStore.getCart(this.request.actorId, params.branchId);
@@ -95,7 +104,7 @@ export class OrderController {
       lines: CartLineInput[];
     },
   ) {
-    if (this.request.actorSource !== 'GLOBAL_USER') {
+    if (this.request.actorSource === 'ANONYMOUS') {
       return c.json(
         {
           code: 'UNAUTHORIZED',
@@ -104,6 +113,16 @@ export class OrderController {
         401,
       );
     }
+    if (this.request.actorSource !== 'CUSTOMER') {
+      return c.json(
+        {
+          code: 'FORBIDDEN',
+          error: 'Business staff accounts cannot manage customer carts',
+        },
+        403,
+      );
+    }
+
     if (body.mergeWithExisting) {
       const merged = await this.cartStore.mergeGuestCart({
         userId: this.request.actorId,
@@ -392,7 +411,7 @@ export class OrderController {
       provider: string;
     },
   ) {
-    const rawBody = await c.req.raw.clone().text();
+    const rawBody = await c.req.text();
     const parsed = await this.deliveryProvider.parseWebhook(
       {
         'x-webhook-signature': c.req.header('x-webhook-signature'),

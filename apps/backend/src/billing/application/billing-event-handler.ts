@@ -5,23 +5,25 @@ import {
   sqlInsert,
   sqlSelect,
   sqlUpdate,
+  TENANT_PERMISSIONS,
   type UnitOfWork,
 } from '@foodapp/db';
 import Decimal from 'decimal.js';
 import type { BillingSettlementService } from '@/billing/application/commands';
 import type { PaymentChannelMode } from '@/billing/domain/billing-events';
 import type { EventBus } from '@/core/application/event-bus';
+import type { ScopedFactory } from '@/core/application/scoped-factory';
 import { formatGbp, money, roundGbp } from '@/core/domain/money';
 import { AppLogger } from '@/logger';
 
 export class BillingSettlementEventHandler {
   private readonly log = new AppLogger('billing-events');
   private readonly uow: UnitOfWork;
-  private readonly billingService: BillingSettlementService;
+  private readonly billingServiceFactory: ScopedFactory<BillingSettlementService>;
 
-  constructor(uow: UnitOfWork, billingService: BillingSettlementService) {
+  constructor(uow: UnitOfWork, billingServiceFactory: ScopedFactory<BillingSettlementService>) {
     this.uow = uow;
-    this.billingService = billingService;
+    this.billingServiceFactory = billingServiceFactory;
   }
 
   // 2. Update `claimEventOnce` to execute on `tx`:
@@ -61,34 +63,47 @@ export class BillingSettlementEventHandler {
         readonly allowLoyaltyEarn: boolean;
       };
 
-      const events = await this.uow.transaction(async (tx) => {
-        if (!(await this.claimEventOnce(event.eventId, tx))) return null;
-
-        const res = await this.billingService.recordOrderFinancials({
-          orderId: p.orderId,
-          branchId: p.branchId,
-          restaurantId: p.restaurantId,
-          customerId: p.customerId,
-          paymentMode: p.paymentMode,
-          gatewayReference: p.gatewayReference,
-          subtotalGbp: new Decimal(p.subtotalGbp),
-          vatGbp: new Decimal(p.vatGbp),
-          deliveryFeeGbp: new Decimal(p.deliveryFeeGbp),
-          loyaltyDiscountGbp: new Decimal(p.loyaltyDiscountGbp),
-          allowLoyaltyEarn: p.allowLoyaltyEarn,
-          actorId: event.metadata.actorId,
-          tx,
-          deferPublish: true,
-        });
-        if (!res.ok) {
-          throw new Error(`${res.error.code}: ${res.error.message}`);
-        }
-        return res.value;
+      const scoped = this.billingServiceFactory({
+        requestId: event.metadata.requestId ?? `event-billing-${Date.now()}`,
+        actorId: event.metadata.actorId,
+        actorSource: 'POS_STAFF',
+        restaurantId: p.restaurantId,
+        branchId: p.branchId,
+        permissions: TENANT_PERMISSIONS,
       });
 
-      if (events) {
-        await eventBus.publish(events);
-        this.log.info`Recorded double-entry financials for order ${p.orderId}`;
+      try {
+        const events = await this.uow.transaction(async (tx) => {
+          if (!(await this.claimEventOnce(event.eventId, tx))) return null;
+
+          const res = await scoped.service.recordOrderFinancials({
+            orderId: p.orderId,
+            branchId: p.branchId,
+            restaurantId: p.restaurantId,
+            customerId: p.customerId,
+            paymentMode: p.paymentMode,
+            gatewayReference: p.gatewayReference,
+            subtotalGbp: new Decimal(p.subtotalGbp),
+            vatGbp: new Decimal(p.vatGbp),
+            deliveryFeeGbp: new Decimal(p.deliveryFeeGbp),
+            loyaltyDiscountGbp: new Decimal(p.loyaltyDiscountGbp),
+            allowLoyaltyEarn: p.allowLoyaltyEarn,
+            actorId: event.metadata.actorId,
+            tx,
+            deferPublish: true,
+          });
+          if (!res.ok) {
+            throw new Error(`${res.error.code}: ${res.error.message}`);
+          }
+          return res.value;
+        });
+
+        if (events) {
+          await eventBus.publish(events);
+          this.log.info`Recorded double-entry financials for order ${p.orderId}`;
+        }
+      } finally {
+        await scoped.dispose();
       }
     });
 

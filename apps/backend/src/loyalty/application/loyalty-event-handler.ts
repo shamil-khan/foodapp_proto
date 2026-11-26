@@ -1,10 +1,18 @@
 import * as crypto from 'node:crypto';
-import { type DbExecutor, ProcessedEventTable, sqlInsert, type UnitOfWork } from '@foodapp/db';
+import {
+  CUSTOMER_PERMISSIONS,
+  type DbExecutor,
+  ProcessedEventTable,
+  sqlInsert,
+  TENANT_PERMISSIONS,
+  type UnitOfWork,
+} from '@foodapp/db';
 import Decimal from 'decimal.js';
 import type { EventBus } from '@/core/application/event-bus';
+import type { ScopedFactory } from '@/core/application/scoped-factory';
 import { formatGbp } from '@/core/domain/money';
 import { AppLogger } from '@/logger';
-import type { LoyaltySettlementPort } from '@/loyalty/application/loyalty-ports';
+import type { LoyaltySettlementService } from '@/loyalty/application/commands';
 import type {
   LoyaltyHoldConfirmedPayload,
   LoyaltyHoldFailedPayload,
@@ -15,13 +23,32 @@ import type {
 export class LoyaltySettlementEventHandler {
   private readonly log = new AppLogger('loyalty-events');
   private readonly uow: UnitOfWork;
-  private readonly loyaltyPort: LoyaltySettlementPort;
+  private readonly loyaltyServiceFactory: ScopedFactory<LoyaltySettlementService>;
   private readonly eventBus: EventBus;
 
-  constructor(uow: UnitOfWork, loyaltyPort: LoyaltySettlementPort, eventBus: EventBus) {
+  constructor(
+    uow: UnitOfWork,
+    loyaltyServiceFactory: ScopedFactory<LoyaltySettlementService>,
+    eventBus: EventBus,
+  ) {
     this.uow = uow;
-    this.loyaltyPort = loyaltyPort;
+    this.loyaltyServiceFactory = loyaltyServiceFactory;
     this.eventBus = eventBus;
+  }
+
+  private openLoyaltyScope(params: {
+    readonly userId?: string;
+    readonly restaurantId?: string;
+    readonly actorId: string;
+    readonly requestId?: string;
+  }) {
+    return this.loyaltyServiceFactory({
+      requestId: params.requestId ?? `event-loyalty-${Date.now()}`,
+      actorId: params.userId ?? params.actorId,
+      actorSource: params.userId ? 'CUSTOMER' : 'POS_STAFF',
+      restaurantId: params.restaurantId,
+      permissions: params.userId ? CUSTOMER_PERMISSIONS : TENANT_PERMISSIONS,
+    });
   }
 
   private async claimEventOnce(eventId: string, tx: DbExecutor): Promise<boolean> {
@@ -54,63 +81,74 @@ export class LoyaltySettlementEventHandler {
         readonly allowLoyaltyRedeem: boolean;
       };
 
-      const outcome = await this.uow.transaction(async (tx) => {
-        if (!(await this.claimEventOnce(event.eventId, tx))) return null;
-        return await this.loyaltyPort.holdCheckoutPoints(
-          {
-            userId: p.userId,
-            restaurantId: p.restaurantId,
-            orderId: p.orderId,
-            issuerScope: p.issuerScope,
-            pointsToHold: p.pointsToHold,
-            allowLoyaltyRedeem: p.allowLoyaltyRedeem,
-          },
-          event.metadata.actorId,
-          tx,
-        );
+      const scoped = this.openLoyaltyScope({
+        userId: p.userId,
+        restaurantId: p.restaurantId,
+        actorId: event.metadata.actorId,
+        requestId: event.metadata.requestId,
       });
-      if (!outcome) return;
 
-      if (!outcome.ok) {
+      try {
+        const outcome = await this.uow.transaction(async (tx) => {
+          if (!(await this.claimEventOnce(event.eventId, tx))) return null;
+          return await scoped.service.holdCheckoutPoints(
+            {
+              userId: p.userId,
+              restaurantId: p.restaurantId,
+              orderId: p.orderId,
+              issuerScope: p.issuerScope,
+              pointsToHold: p.pointsToHold,
+              allowLoyaltyRedeem: p.allowLoyaltyRedeem,
+            },
+            event.metadata.actorId,
+            tx,
+          );
+        });
+        if (!outcome) return;
+
+        if (!outcome.ok) {
+          await this.eventBus.publish([
+            {
+              eventId: crypto.randomUUID(),
+              aggregateId: p.orderId,
+              aggregateType: 'LoyaltyWalletAggregate',
+              eventType: 'LoyaltyHoldFailed',
+              version: 1,
+              occurredAt: new Date(),
+              payload: {
+                orderId: p.orderId,
+                userId: p.userId,
+                code: outcome.error.code,
+                reason: outcome.error.message,
+              } satisfies LoyaltyHoldFailedPayload,
+              metadata: event.metadata,
+            },
+          ]);
+          return;
+        }
+
         await this.eventBus.publish([
           {
             eventId: crypto.randomUUID(),
             aggregateId: p.orderId,
             aggregateType: 'LoyaltyWalletAggregate',
-            eventType: 'LoyaltyHoldFailed',
+            eventType: 'LoyaltyHoldConfirmed',
             version: 1,
             occurredAt: new Date(),
             payload: {
               orderId: p.orderId,
               userId: p.userId,
-              code: outcome.error.code,
-              reason: outcome.error.message,
-            } satisfies LoyaltyHoldFailedPayload,
+              pointsHeld: outcome.value.pointsHeld,
+              discountGbp: formatGbp(outcome.value.discountGbp),
+              issuerScope: outcome.value.issuerScope,
+            } satisfies LoyaltyHoldConfirmedPayload,
             metadata: event.metadata,
           },
         ]);
-        return;
+        this.log.info`Held ${outcome.value.pointsHeld} loyalty points for order ${p.orderId}`;
+      } finally {
+        await scoped.dispose();
       }
-
-      await this.eventBus.publish([
-        {
-          eventId: crypto.randomUUID(),
-          aggregateId: p.orderId,
-          aggregateType: 'LoyaltyWalletAggregate',
-          eventType: 'LoyaltyHoldConfirmed',
-          version: 1,
-          occurredAt: new Date(),
-          payload: {
-            orderId: p.orderId,
-            userId: p.userId,
-            pointsHeld: outcome.value.pointsHeld,
-            discountGbp: formatGbp(outcome.value.discountGbp),
-            issuerScope: outcome.value.issuerScope,
-          } satisfies LoyaltyHoldConfirmedPayload,
-          metadata: event.metadata,
-        },
-      ]);
-      this.log.info`Held ${outcome.value.pointsHeld} loyalty points for order ${p.orderId}`;
     });
 
     eventBus.subscribe('BillingSettlementRecorded', async (event) => {
@@ -122,22 +160,33 @@ export class LoyaltySettlementEventHandler {
         readonly allowLoyaltyEarn?: boolean;
       };
 
-      const committed = await this.uow.transaction(async (tx) => {
-        if (!(await this.claimEventOnce(event.eventId, tx))) return false;
-        if (!p.customerId) return true;
-        await this.loyaltyPort.settleOrderLoyalty({
-          orderId: p.orderId,
-          userId: p.customerId,
-          restaurantId: p.restaurantId,
-          netFoodSubtotalGbp: new Decimal(p.subtotalGbp),
-          allowLoyaltyEarn: p.allowLoyaltyEarn ?? true,
-          actorId: event.metadata.actorId,
-          tx,
-        });
-        return true;
+      const scoped = this.openLoyaltyScope({
+        userId: p.customerId,
+        restaurantId: p.restaurantId,
+        actorId: event.metadata.actorId,
+        requestId: event.metadata.requestId,
       });
-      if (committed && p.customerId) {
-        this.log.info`Settled loyalty hold & pending accrual for order ${p.orderId}`;
+
+      try {
+        const committed = await this.uow.transaction(async (tx) => {
+          if (!(await this.claimEventOnce(event.eventId, tx))) return false;
+          if (!p.customerId) return true;
+          await scoped.service.settleOrderLoyalty({
+            orderId: p.orderId,
+            userId: p.customerId,
+            restaurantId: p.restaurantId,
+            netFoodSubtotalGbp: new Decimal(p.subtotalGbp),
+            allowLoyaltyEarn: p.allowLoyaltyEarn ?? true,
+            actorId: event.metadata.actorId,
+            tx,
+          });
+          return true;
+        });
+        if (committed && p.customerId) {
+          this.log.info`Settled loyalty hold & pending accrual for order ${p.orderId}`;
+        }
+      } finally {
+        await scoped.dispose();
       }
     });
 
@@ -148,20 +197,30 @@ export class LoyaltySettlementEventHandler {
         readonly reason: string;
       };
 
-      const committed = await this.uow.transaction(async (tx) => {
-        if (!(await this.claimEventOnce(event.eventId, tx))) return false;
-        if (!p.customerId) return true;
-        await this.loyaltyPort.releaseCheckoutHold(
-          p.orderId,
-          p.customerId,
-          p.reason,
-          event.metadata.actorId,
-          tx,
-        );
-        return true;
+      const scoped = this.openLoyaltyScope({
+        userId: p.customerId,
+        actorId: event.metadata.actorId,
+        requestId: event.metadata.requestId,
       });
-      if (committed && p.customerId) {
-        this.log.info`Released held loyalty points for cancelled order ${p.orderId}`;
+
+      try {
+        const committed = await this.uow.transaction(async (tx) => {
+          if (!(await this.claimEventOnce(event.eventId, tx))) return false;
+          if (!p.customerId) return true;
+          await scoped.service.releaseCheckoutHold(
+            p.orderId,
+            p.customerId,
+            p.reason,
+            event.metadata.actorId,
+            tx,
+          );
+          return true;
+        });
+        if (committed && p.customerId) {
+          this.log.info`Released held loyalty points for cancelled order ${p.orderId}`;
+        }
+      } finally {
+        await scoped.dispose();
       }
     });
 
@@ -173,38 +232,48 @@ export class LoyaltySettlementEventHandler {
         readonly markPaidReference?: string;
       };
 
-      const offsetRes = await this.uow.transaction(async (tx) => {
-        if (!(await this.claimEventOnce(event.eventId, tx))) return null;
-        return await this.loyaltyPort.redeemMerchantPointsForFeeOffset({
-          restaurantId: p.restaurantId,
-          settlementId: p.settlementId,
-          maxOffsetGbp: new Decimal(p.maxOffsetGbp),
-          actorId: event.metadata.actorId,
-          tx,
-        });
+      const scoped = this.openLoyaltyScope({
+        restaurantId: p.restaurantId,
+        actorId: event.metadata.actorId,
+        requestId: event.metadata.requestId,
       });
-      if (!offsetRes) return;
 
-      await this.eventBus.publish([
-        {
-          eventId: crypto.randomUUID(),
-          aggregateId: p.settlementId,
-          aggregateType: 'LoyaltyWalletAggregate',
-          eventType: 'MerchantLoyaltyOffsetApplied',
-          version: 1,
-          occurredAt: new Date(),
-          payload: {
-            settlementId: p.settlementId,
+      try {
+        const offsetRes = await this.uow.transaction(async (tx) => {
+          if (!(await this.claimEventOnce(event.eventId, tx))) return null;
+          return await scoped.service.redeemMerchantPointsForFeeOffset({
             restaurantId: p.restaurantId,
-            pointsRedeemed: offsetRes.pointsRedeemed,
-            offsetGbp: formatGbp(offsetRes.offsetGbp),
-            markPaidReference: p.markPaidReference,
-          } satisfies MerchantLoyaltyOffsetAppliedPayload,
-          metadata: event.metadata,
-        },
-      ]);
-      this.log
-        .info`Redeemed ${offsetRes.pointsRedeemed} merchant points for settlement ${p.settlementId}`;
+            settlementId: p.settlementId,
+            maxOffsetGbp: new Decimal(p.maxOffsetGbp),
+            actorId: event.metadata.actorId,
+            tx,
+          });
+        });
+        if (!offsetRes) return;
+
+        await this.eventBus.publish([
+          {
+            eventId: crypto.randomUUID(),
+            aggregateId: p.settlementId,
+            aggregateType: 'LoyaltyWalletAggregate',
+            eventType: 'MerchantLoyaltyOffsetApplied',
+            version: 1,
+            occurredAt: new Date(),
+            payload: {
+              settlementId: p.settlementId,
+              restaurantId: p.restaurantId,
+              pointsRedeemed: offsetRes.pointsRedeemed,
+              offsetGbp: formatGbp(offsetRes.offsetGbp),
+              markPaidReference: p.markPaidReference,
+            } satisfies MerchantLoyaltyOffsetAppliedPayload,
+            metadata: event.metadata,
+          },
+        ]);
+        this.log
+          .info`Redeemed ${offsetRes.pointsRedeemed} merchant points for settlement ${p.settlementId}`;
+      } finally {
+        await scoped.dispose();
+      }
     });
   }
 }

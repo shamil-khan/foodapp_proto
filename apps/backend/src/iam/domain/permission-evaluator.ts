@@ -1,6 +1,16 @@
-import { ALL_PERMISSIONS, type Permission, type PermissionEffect } from '@foodapp/db';
+import {
+  CUSTOMER_PERMISSIONS,
+  type Permission,
+  type PermissionEffect,
+  PLATFORM_ADMIN_PERMISSIONS,
+  TENANT_PERMISSIONS,
+} from '@foodapp/db';
 
-const ALLOWED_PERMISSION_SET = new Set<string>(ALL_PERMISSIONS);
+const ALLOWED_PERMISSION_SET = new Set<string>([
+  ...TENANT_PERMISSIONS,
+  ...CUSTOMER_PERMISSIONS,
+  ...PLATFORM_ADMIN_PERMISSIONS,
+]);
 
 export interface DirectPermissionPolicyRule {
   readonly permission: string;

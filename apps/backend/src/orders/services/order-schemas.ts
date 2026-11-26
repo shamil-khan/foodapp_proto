@@ -187,6 +187,14 @@ export const getCartRoute = createRoute({
         },
       },
     },
+    403: {
+      description: 'Forbidden: Business staff accounts cannot manage customer carts',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
   },
 });
 
@@ -232,6 +240,14 @@ export const upsertCartRoute = createRoute({
     },
     401: {
       description: 'Unauthorized customer session',
+      content: {
+        'application/json': {
+          schema: DomainErrorResponseSchema,
+        },
+      },
+    },
+    403: {
+      description: 'Forbidden: Business staff accounts cannot manage customer carts',
       content: {
         'application/json': {
           schema: DomainErrorResponseSchema,

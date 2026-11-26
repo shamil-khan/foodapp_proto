@@ -1,4 +1,4 @@
-import { ALL_PERMISSIONS, type Permission } from '@foodapp/db';
+import { type Permission, TENANT_PERMISSIONS } from '@foodapp/db';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { sign, verify } from 'hono/jwt';
@@ -7,7 +7,7 @@ import type { PosStaffSessionClaims, StaffAssignedBranchDto } from '@/iam/domain
 const POS_JWT_SECRET = process.env.BETTER_AUTH_SECRET ?? 'dev_pos_secret_change_in_prod';
 const POS_COOKIE_NAME = 'pos_staff_token';
 const SHIFT_TTL_SECONDS = 60 * 60 * 12;
-const ALLOWED_PERMS = new Set<string>(ALL_PERMISSIONS);
+const ALLOWED_PERMS = new Set<string>(TENANT_PERMISSIONS);
 
 export class PosTokenService {
   async issueShiftSession(c: Context, claims: PosStaffSessionClaims): Promise<string> {

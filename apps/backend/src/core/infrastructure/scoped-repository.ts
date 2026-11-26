@@ -23,17 +23,8 @@ export class ScopedRepository {
   }
 
   protected resolveBranchScope(requestedBranchId?: string): TenantScopeFilter {
-    if (this.request.actorSource === 'SYSTEM') {
-      return {
-        unrestricted: true,
-        branchId: requestedBranchId,
-      };
-    }
-    if (
-      this.request.actorSource === 'GLOBAL_USER' &&
-      this.request.globalRole === 'PLATFORM_ADMIN' &&
-      this.request.supportGrant
-    ) {
+    // Platform staff may access branch-scoped data only under a valid brand-approved support ticket
+    if (this.request.actorSource === 'PLATFORM_STAFF' && this.request.supportGrant) {
       if (
         this.request.supportGrant.branchId &&
         requestedBranchId &&
@@ -68,17 +59,7 @@ export class ScopedRepository {
   }
 
   protected resolveRestaurantScope(requestedRestaurantId?: string): TenantScopeFilter {
-    if (this.request.actorSource === 'SYSTEM') {
-      return {
-        unrestricted: true,
-        restaurantId: requestedRestaurantId,
-      };
-    }
-    if (
-      this.request.actorSource === 'GLOBAL_USER' &&
-      this.request.globalRole === 'PLATFORM_ADMIN' &&
-      this.request.supportGrant
-    ) {
+    if (this.request.actorSource === 'PLATFORM_STAFF' && this.request.supportGrant) {
       if (
         requestedRestaurantId &&
         requestedRestaurantId !== this.request.supportGrant.restaurantId
@@ -106,13 +87,8 @@ export class ScopedRepository {
   }
 
   protected resolveUserScope(targetUserId: string): TenantScopeFilter {
-    if (this.request.actorSource === 'SYSTEM') {
-      return {
-        unrestricted: true,
-        userId: targetUserId,
-      };
-    }
-    if (this.request.actorSource === 'GLOBAL_USER' && this.request.actorId === targetUserId) {
+    // Only personal CUSTOMER accounts can open consumer user-scoped repositories
+    if (this.request.actorSource === 'CUSTOMER' && this.request.actorId === targetUserId) {
       return {
         unrestricted: false,
         userId: targetUserId,

@@ -20,6 +20,37 @@ export default defineConfig({
     reporters: [
       'verbose',
     ],
+    coverage: {
+      provider: 'v8',
+      reporter: [
+        'text',
+        'text-summary',
+        'html',
+      ],
+      reportsDirectory: './coverage',
+      include: [
+        'src/**/*.ts',
+      ],
+      exclude: [
+        'src/index.ts',
+        'src/**/mocks/**',
+        'src/**/*-events.ts',
+        'src/**/*-port.ts',
+        // have to removed them
+        'src/**/*-schemas.ts',
+        'src/core/application/scoped-factory.ts',
+        'src/core/domain/domain-event.ts',
+        'src/core/domain/memento.ts',
+        'src/core/patterns/visitor.ts',
+        'src/iam/domain/auth-actor.ts',
+      ],
+      thresholds: {
+        lines: 80,
+        functions: 80,
+        branches: 60, // 75,
+        statements: 80,
+      },
+    },
     projects: [
       {
         resolve: {

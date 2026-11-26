@@ -155,8 +155,7 @@ describe('GetCustomerLoyaltyHandler — Merchant Scope Isolation', () => {
     const authz = new AuthorizationPolicy({
       requestId: 'req-loy-1',
       actorId: 'cust-1',
-      actorSource: 'GLOBAL_USER',
-      globalRole: 'CUSTOMER',
+      actorSource: 'CUSTOMER',
       permissions: [
         'loyalty:read',
       ],

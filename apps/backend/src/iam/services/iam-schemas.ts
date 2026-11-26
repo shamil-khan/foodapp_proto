@@ -1,4 +1,4 @@
-import { ALL_PERMISSIONS, TENANT_PERMISSIONS } from '@foodapp/db';
+import { CUSTOMER_PERMISSIONS, PLATFORM_ADMIN_PERMISSIONS, TENANT_PERMISSIONS } from '@foodapp/db';
 import { createRoute, z } from '@hono/zod-openapi';
 import {
   DomainErrorResponseSchema,
@@ -7,7 +7,13 @@ import {
 } from '@/core/services/openapi-shared';
 
 export const TenantPermissionSchema = z.enum(TENANT_PERMISSIONS).openapi('TenantPermission');
-export const PermissionSchema = z.enum(ALL_PERMISSIONS).openapi('Permission');
+export const PermissionSchema = z
+  .enum([
+    ...TENANT_PERMISSIONS,
+    ...CUSTOMER_PERMISSIONS,
+    ...PLATFORM_ADMIN_PERMISSIONS,
+  ])
+  .openapi('Permission');
 
 export const DirectPermissionRuleSchema = z
   .object({
@@ -94,9 +100,10 @@ export const ActiveActorProfileSchema = z
   .object({
     id: z.uuid(),
     source: z.enum([
-      'GLOBAL_USER',
+      'ANONYMOUS',
+      'CUSTOMER',
       'POS_STAFF',
-      'SYSTEM',
+      'PLATFORM_STAFF',
     ]),
     name: z.string(),
     email: z.email(),

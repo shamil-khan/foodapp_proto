@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ALL_PERMISSIONS, pgPool, redisClient, SYSTEM_ACTORS } from '@foodapp/db';
+import { pgPool, redisClient, SYSTEM_ROLE_DEFINITIONS } from '@foodapp/db';
 import Decimal from 'decimal.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rootContainer } from '@/container';
@@ -10,6 +10,7 @@ async function insertStubOrder(
   branchId: string,
   subtotalGbp: string,
   totalGbp: string,
+  actorId: string,
 ): Promise<void> {
   await pgPool.query(
     `INSERT INTO "Order" ("id", "branchId", "status", "subtotal", "totalAmount", "createdBy", "updatedBy")
@@ -19,7 +20,7 @@ async function insertStubOrder(
       branchId,
       subtotalGbp,
       totalGbp,
-      SYSTEM_ACTORS.SYSTEM_CRON,
+      actorId,
     ],
   );
 }
@@ -27,6 +28,8 @@ async function insertStubOrder(
 describe('billing.b2b-settlement — Online Payable vs Cash Commission Netting & Payout', () => {
   const restaurantId = 'a0000000-0000-4000-8000-000000000005';
   const branchId = 'b0000000-0000-4000-8000-000000000006';
+  const tomStaffId = 'c0000000-0000-4000-8000-000000000007';
+  const biteInOwnerId = 'c0000000-0000-4000-8000-000000000002';
 
   beforeAll(async () => {
     if (!redisClient.isOpen) await redisClient.connect();
@@ -40,11 +43,11 @@ describe('billing.b2b-settlement — Online Payable vs Cash Commission Netting &
     const scope = rootContainer.createScope({
       request: {
         requestId: randomUUID(),
-        actorId: SYSTEM_ACTORS.SYSTEM_CRON,
-        actorSource: 'SYSTEM',
+        actorId: tomStaffId,
+        actorSource: 'POS_STAFF',
         restaurantId,
         branchId,
-        permissions: ALL_PERMISSIONS,
+        permissions: SYSTEM_ROLE_DEFINITIONS.BRAND_OWNER.permissions,
       },
       log: new AppLogger('int-b2b-settle'),
     });
@@ -53,8 +56,8 @@ describe('billing.b2b-settlement — Online Payable vs Cash Commission Netting &
       const billingService = scope.get('billingSettlementService');
       const onlineOrderId = randomUUID();
       const cashOrderId = randomUUID();
-      await insertStubOrder(onlineOrderId, branchId, '40.00', '48.00');
-      await insertStubOrder(cashOrderId, branchId, '20.00', '24.00');
+      await insertStubOrder(onlineOrderId, branchId, '40.00', '48.00', tomStaffId);
+      await insertStubOrder(cashOrderId, branchId, '20.00', '24.00', tomStaffId);
 
       const onlineRec = await billingService.recordOrderFinancials({
         orderId: onlineOrderId,
@@ -66,7 +69,7 @@ describe('billing.b2b-settlement — Online Payable vs Cash Commission Netting &
         deliveryFeeGbp: new Decimal('0.00'),
         loyaltyDiscountGbp: new Decimal('0.00'),
         allowLoyaltyEarn: true,
-        actorId: SYSTEM_ACTORS.SYSTEM_CRON,
+        actorId: tomStaffId,
       });
       expect(onlineRec.ok).toBe(true);
 
@@ -80,7 +83,7 @@ describe('billing.b2b-settlement — Online Payable vs Cash Commission Netting &
         deliveryFeeGbp: new Decimal('0.00'),
         loyaltyDiscountGbp: new Decimal('0.00'),
         allowLoyaltyEarn: false,
-        actorId: SYSTEM_ACTORS.SYSTEM_CRON,
+        actorId: tomStaffId,
       });
       expect(cashRec.ok).toBe(true);
 
@@ -111,11 +114,11 @@ describe('billing.b2b-settlement — Online Payable vs Cash Commission Netting &
     const scope = rootContainer.createScope({
       request: {
         requestId: randomUUID(),
-        actorId: SYSTEM_ACTORS.SYSTEM_CRON,
-        actorSource: 'SYSTEM',
+        actorId: biteInOwnerId,
+        actorSource: 'POS_STAFF',
         restaurantId: cashOnlyBrandId,
         branchId: cashOnlyBranchId,
-        permissions: ALL_PERMISSIONS,
+        permissions: SYSTEM_ROLE_DEFINITIONS.BRAND_OWNER.permissions,
       },
       log: new AppLogger('int-b2b-cash-only'),
     });
@@ -123,7 +126,7 @@ describe('billing.b2b-settlement — Online Payable vs Cash Commission Netting &
     try {
       const billingService = scope.get('billingSettlementService');
       const cashOrderId = randomUUID();
-      await insertStubOrder(cashOrderId, cashOnlyBranchId, '50.00', '60.00');
+      await insertStubOrder(cashOrderId, cashOnlyBranchId, '50.00', '60.00', biteInOwnerId);
 
       const cashRec = await billingService.recordOrderFinancials({
         orderId: cashOrderId,
@@ -135,7 +138,7 @@ describe('billing.b2b-settlement — Online Payable vs Cash Commission Netting &
         deliveryFeeGbp: new Decimal('0.00'),
         loyaltyDiscountGbp: new Decimal('0.00'),
         allowLoyaltyEarn: false,
-        actorId: SYSTEM_ACTORS.SYSTEM_CRON,
+        actorId: biteInOwnerId,
       });
       expect(cashRec.ok).toBe(true);
 

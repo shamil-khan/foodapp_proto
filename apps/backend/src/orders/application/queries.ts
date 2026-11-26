@@ -173,7 +173,10 @@ export class GetOrderByIdHandler implements QueryHandler<GetOrderByIdQuery, Orde
     const order = await this.readRepo.findOne(oQ);
     if (!order) return null;
 
-    if (this.request.actorSource === 'GLOBAL_USER' && !this.authz.isPlatformAdmin()) {
+    if (this.request.actorSource === 'ANONYMOUS') {
+      throw new DomainError('UNAUTHORIZED', 'Authentication required.', 401);
+    }
+    if (this.request.actorSource === 'CUSTOMER') {
       if (order.customerId !== this.request.actorId) {
         throw new DomainError('FORBIDDEN', 'Order does not belong to current customer.', 403);
       }
@@ -182,6 +185,8 @@ export class GetOrderByIdHandler implements QueryHandler<GetOrderByIdQuery, Orde
       if (!access.ok) {
         throw new DomainError(access.error.code, access.error.message, 403);
       }
+    } else if (this.request.actorSource === 'PLATFORM_STAFF' && !this.authz.isPlatformAdmin()) {
+      throw new DomainError('FORBIDDEN', 'Order access denied.', 403);
     }
 
     const liCols = OrderLineItemTable.cols;

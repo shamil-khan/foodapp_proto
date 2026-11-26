@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { pgPool, redisClient, SYSTEM_ACTORS } from '@foodapp/db';
+import { ANONYMOUS_ACTOR_ID, pgPool, redisClient } from '@foodapp/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rootContainer } from '@/container';
 import { AppLogger } from '@/logger';
@@ -17,8 +17,8 @@ describe('brand-catalog.onboarding-sync-saga — All-or-Nothing Onboarding Rollb
     const scope = rootContainer.createScope({
       request: {
         requestId: randomUUID(),
-        actorId: SYSTEM_ACTORS.SYSTEM_CRON,
-        actorSource: 'SYSTEM',
+        actorId: ANONYMOUS_ACTOR_ID,
+        actorSource: 'ANONYMOUS',
         permissions: [],
       },
       log: new AppLogger('int-brand-onboarding-rollback'),
@@ -69,7 +69,7 @@ describe('brand-catalog.onboarding-sync-saga — All-or-Nothing Onboarding Rollb
             reason: 'Simulated catalog initialization failure',
           },
           metadata: {
-            actorId: SYSTEM_ACTORS.SYSTEM_CRON,
+            actorId: ANONYMOUS_ACTOR_ID,
             restaurantId,
           },
         },

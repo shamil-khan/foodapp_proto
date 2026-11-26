@@ -1,9 +1,8 @@
 import {
-  ALL_PERMISSIONS,
+  BOOTSTRAP_ACTOR_ID,
   type DbReader,
   dbReader,
   redisClient,
-  SYSTEM_ACTORS,
   type UnitOfWork,
   unitOfWork,
 } from '@foodapp/db';
@@ -65,6 +64,7 @@ import {
   type QueryBus,
 } from '@/core/application/cqrs';
 import { type EventBus, InMemoryEventBus } from '@/core/application/event-bus';
+import type { ScopedFactory } from '@/core/application/scoped-factory';
 import { PgEventStore } from '@/core/infrastructure/pg-event-store';
 import { PgSagaRepository } from '@/core/infrastructure/pg-saga-repository';
 import { ReadRepository } from '@/core/infrastructure/read-repository';
@@ -129,6 +129,13 @@ import { SupportController } from '@/support/services/support-controller';
 export type { RequestContext };
 
 type RedisClientType = typeof redisClient;
+
+let createChildScope: (inputs: {
+  readonly request: RequestContext;
+  readonly log: AppLogger;
+}) => RequestScope = () => {
+  throw new Error('rootContainer not initialized');
+};
 
 export const DI_TOKENS = {
   CORE: {
@@ -213,6 +220,7 @@ export const DI_TOKENS = {
     GATEWAY: 'paymentGateway',
     CARD_TERMINAL: 'cardTerminal',
     SETTLEMENT_SERVICE: 'billingSettlementService',
+    SETTLEMENT_SERVICE_FACTORY: 'billingSettlementServiceFactory',
     EVENT_HANDLER: 'billingSettlementEventHandler',
     GET_RESTAURANT_BILLING_HANDLER: 'getRestaurantBillingHandler',
     REFUND_ORDER_HANDLER: 'refundOrderHandler',
@@ -222,6 +230,7 @@ export const DI_TOKENS = {
   LOYALTY: {
     REPO: 'loyaltyRepo',
     SETTLEMENT_SERVICE: 'loyaltySettlementService',
+    SETTLEMENT_SERVICE_FACTORY: 'loyaltySettlementServiceFactory',
     EVENT_HANDLER: 'loyaltySettlementEventHandler',
     GET_CUSTOMER_LOYALTY_HANDLER: 'getCustomerLoyaltyHandler',
     UPDATE_GOVERNANCE_HANDLER: 'updateLoyaltyGovernanceHandler',
@@ -803,7 +812,6 @@ const iamModule = defineBoundedContext<IamProvides>({
   },
 });
 
-// FILE: apps/backend/src/container.ts (catalogModule — Part 1 of 2)
 // Declaring Catalog bounded context:
 // Manages menu categories, items, modifiers, pricing policies, branch menu overrides,
 // and compiled JSONB + Redis menu snapshots via `BranchCatalogSyncSaga`.
@@ -1074,10 +1082,8 @@ const supportModule = defineBoundedContext<SupportProvides>({
 type LoyaltyProvides = {
   loyaltyRepo: WithRequirements<Spec<LoyaltyRepository, 'scoped'>, 'request'>;
   loyaltySettlementService: WithRequirements<Spec<LoyaltySettlementService, 'scoped'>, 'request'>;
-  loyaltySettlementEventHandler: WithRequirements<
-    Spec<LoyaltySettlementEventHandler, 'scoped'>,
-    'request'
-  >;
+  loyaltySettlementServiceFactory: Spec<ScopedFactory<LoyaltySettlementService>, 'singleton'>;
+  loyaltySettlementEventHandler: Spec<LoyaltySettlementEventHandler, 'singleton'>;
   getCustomerLoyaltyHandler: WithRequirements<Spec<GetCustomerLoyaltyHandler, 'scoped'>, 'request'>;
   updateLoyaltyGovernanceHandler: WithRequirements<
     Spec<UpdateLoyaltyGovernanceHandler, 'scoped'>,
@@ -1095,8 +1101,32 @@ const loyaltyModule = defineBoundedContext<LoyaltyProvides>({
   queryDeps: [
     DI_TOKENS.LOYALTY.GET_CUSTOMER_LOYALTY_HANDLER,
   ],
+
   module: (container) =>
     container
+      .registerValue<
+        typeof DI_TOKENS.LOYALTY.SETTLEMENT_SERVICE_FACTORY,
+        ScopedFactory<LoyaltySettlementService>
+      >(DI_TOKENS.LOYALTY.SETTLEMENT_SERVICE_FACTORY, (request) => {
+        const scope = createChildScope({
+          request,
+          log: new AppLogger(request.requestId),
+        });
+        return {
+          service: scope.get(DI_TOKENS.LOYALTY.SETTLEMENT_SERVICE),
+          dispose: () => scope.dispose(),
+        };
+      })
+      .registerClass(
+        DI_TOKENS.LOYALTY.EVENT_HANDLER,
+        LoyaltySettlementEventHandler,
+        [
+          DI_TOKENS.CORE.UOW,
+          DI_TOKENS.LOYALTY.SETTLEMENT_SERVICE_FACTORY,
+          DI_TOKENS.CORE.EVENT_BUS,
+        ],
+        'singleton',
+      )
       .registerClass(
         DI_TOKENS.LOYALTY.REPO,
         LoyaltyRepository,
@@ -1113,16 +1143,6 @@ const loyaltyModule = defineBoundedContext<LoyaltyProvides>({
           DI_TOKENS.CORE.UOW,
           DI_TOKENS.LOYALTY.REPO,
           DI_TOKENS.CORE.CLOCK,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.LOYALTY.EVENT_HANDLER,
-        LoyaltySettlementEventHandler,
-        [
-          DI_TOKENS.CORE.UOW,
-          DI_TOKENS.LOYALTY.SETTLEMENT_SERVICE,
-          DI_TOKENS.CORE.EVENT_BUS,
         ],
         'scoped',
       )
@@ -1184,10 +1204,8 @@ type BillingProvides = {
   paymentGateway: Spec<DeterministicMockGateway, 'singleton'>;
   cardTerminal: Spec<MockCardTerminalAdapter, 'singleton'>;
   billingSettlementService: WithRequirements<Spec<BillingSettlementService, 'scoped'>, 'request'>;
-  billingSettlementEventHandler: WithRequirements<
-    Spec<BillingSettlementEventHandler, 'scoped'>,
-    'request'
-  >;
+  billingSettlementServiceFactory: Spec<ScopedFactory<BillingSettlementService>, 'singleton'>;
+  billingSettlementEventHandler: Spec<BillingSettlementEventHandler, 'singleton'>;
   getRestaurantBillingHandler: WithRequirements<
     Spec<GetRestaurantBillingHandler, 'scoped'>,
     'request'
@@ -1207,6 +1225,28 @@ const billingModule = defineBoundedContext<BillingProvides>({
   ],
   module: (container) =>
     container
+      .registerValue<
+        typeof DI_TOKENS.BILLING.SETTLEMENT_SERVICE_FACTORY,
+        ScopedFactory<BillingSettlementService>
+      >(DI_TOKENS.BILLING.SETTLEMENT_SERVICE_FACTORY, (request) => {
+        const scope = createChildScope({
+          request,
+          log: new AppLogger(request.requestId),
+        });
+        return {
+          service: scope.get(DI_TOKENS.BILLING.SETTLEMENT_SERVICE),
+          dispose: () => scope.dispose(),
+        };
+      })
+      .registerClass(
+        DI_TOKENS.BILLING.EVENT_HANDLER,
+        BillingSettlementEventHandler,
+        [
+          DI_TOKENS.CORE.UOW,
+          DI_TOKENS.BILLING.SETTLEMENT_SERVICE_FACTORY,
+        ],
+        'singleton',
+      )
       .registerClass(
         DI_TOKENS.BILLING.REPO,
         BillingRepository,
@@ -1225,15 +1265,6 @@ const billingModule = defineBoundedContext<BillingProvides>({
           DI_TOKENS.CORE.UOW,
           DI_TOKENS.BILLING.REPO,
           DI_TOKENS.CORE.EVENT_BUS,
-        ],
-        'scoped',
-      )
-      .registerClass(
-        DI_TOKENS.BILLING.EVENT_HANDLER,
-        BillingSettlementEventHandler,
-        [
-          DI_TOKENS.CORE.UOW,
-          DI_TOKENS.BILLING.SETTLEMENT_SERVICE,
         ],
         'scoped',
       )
@@ -1646,6 +1677,9 @@ export const rootContainer = domainContainer
     ],
     'scoped',
   );
+
+createChildScope = (inputs) => rootContainer.createScope(inputs);
+
 export interface ScopeServices {
   request: RequestContext;
   log: AppLogger;
@@ -1711,9 +1745,9 @@ function registerDomainEventSubscribers(scope: RequestScope, bus: InMemoryEventB
 const bootScope: RequestScope = rootContainer.createScope({
   request: {
     requestId: 'bootstrap',
-    actorId: SYSTEM_ACTORS.SYSTEM_CRON,
-    actorSource: 'SYSTEM',
-    permissions: ALL_PERMISSIONS,
+    actorId: BOOTSTRAP_ACTOR_ID,
+    actorSource: 'ANONYMOUS',
+    permissions: [],
   },
   log: new AppLogger('bootstrap'),
 });

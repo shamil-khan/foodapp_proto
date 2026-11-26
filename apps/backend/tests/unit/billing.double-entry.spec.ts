@@ -1,4 +1,4 @@
-import { SYSTEM_ACTORS, type UnitOfWork } from '@foodapp/db';
+import { type UnitOfWork } from '@foodapp/db';
 import Decimal from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 import { BillingSettlementEventHandler } from '@/billing/application/billing-event-handler';
@@ -125,10 +125,14 @@ describe('RefundOrderHandler — Restaurant Scope Resolution', () => {
 
     const req = {
       requestId: 'req-ref-1',
-      actorId: SYSTEM_ACTORS.SYSTEM_CRON,
-      actorSource: 'SYSTEM' as const,
-      permissions: [],
+      actorId: 'staff-1',
+      actorSource: 'POS_STAFF' as const,
+      branchId: 'branch-1',
+      permissions: [
+        'orders:settle' as const,
+      ],
     };
+
     const handler = new RefundOrderHandler(
       fakeUow,
       fakeRepo as never,
@@ -176,7 +180,10 @@ describe('BillingSettlementEventHandler — Atomic ProcessedEvent Claim', () => 
       }),
     };
 
-    new BillingSettlementEventHandler(fakeUow, fakeService as never).register(bus);
+    new BillingSettlementEventHandler(fakeUow, () => ({
+      service: fakeService as never,
+      dispose: async () => {},
+    })).register(bus);
 
     await bus.publish([
       {
@@ -241,13 +248,20 @@ describe('BillingSettlementEventHandler & RefundOrderHandler — Post-Commit & C
 
     const req = {
       requestId: 'req-1',
-      actorId: SYSTEM_ACTORS.SYSTEM_CRON,
-      actorSource: 'SYSTEM' as const,
-      permissions: [],
+      actorId: 'staff-1',
+      actorSource: 'POS_STAFF' as const,
+      restaurantId: 'r-1',
+      branchId: 'b-1',
+      permissions: [
+        'ledger:read' as const,
+      ],
     };
     const repo = new BillingRepository(fakeUow, req);
     const service = new BillingSettlementService(fakeUow, repo, bus);
-    new BillingSettlementEventHandler(fakeUow, service).register(bus);
+    new BillingSettlementEventHandler(fakeUow, () => ({
+      service,
+      dispose: async () => {},
+    })).register(bus);
 
     await bus.publish([
       {
@@ -304,10 +318,13 @@ describe('BillingSettlementEventHandler & RefundOrderHandler — Post-Commit & C
 
     const req = {
       requestId: 'req-ref-2',
-      actorId: SYSTEM_ACTORS.SYSTEM_CRON,
-      actorSource: 'SYSTEM' as const,
+      actorId: 'staff-1',
+      actorSource: 'POS_STAFF' as const,
       restaurantId: 'rest-1',
-      permissions: [],
+      branchId: 'branch-1',
+      permissions: [
+        'orders:settle' as const,
+      ],
     };
     const handler = new RefundOrderHandler(
       fakeUow,

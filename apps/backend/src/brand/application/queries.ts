@@ -227,8 +227,7 @@ export class ResolveBrandByHandleHandler
 
     const isPrivileged =
       this.request.actorSource === 'POS_STAFF' && this.request.restaurantId === brandRow.id;
-    const viewerUserId =
-      this.request.actorSource === 'GLOBAL_USER' ? this.request.actorId : undefined;
+    const viewerUserId = this.request.actorSource === 'CUSTOMER' ? this.request.actorId : undefined;
 
     const branches: StorefrontBranchDto[] = await Promise.all(
       branchRows.map(async (b) => {

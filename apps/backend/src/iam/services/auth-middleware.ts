@@ -1,15 +1,18 @@
 import * as crypto from 'node:crypto';
 import {
+  ANONYMOUS_ACTOR_ID,
   type Permission,
   type PlatformRole,
   type PlatformSupportScope,
-  SYSTEM_ACTORS,
   type TenantRole,
 } from '@foodapp/db';
 import { inferdiHono } from '@inferdi/hono';
 import { createMiddleware } from 'hono/factory';
 import { type AppEnv, type RequestContext, rootContainer } from '@/container';
-import { resolveDefaultPermissionsForActor } from '@/core/application/authorization';
+import {
+  type ActorSource,
+  resolveDefaultPermissionsForActor,
+} from '@/core/application/authorization';
 import { auth } from '@/iam/infrastructure/better-auth';
 import { PosTokenService } from '@/iam/infrastructure/pos-token-service';
 import type { RolePermissionCache } from '@/iam/infrastructure/role-permission-cache';
@@ -27,10 +30,11 @@ export const initDiScope = inferdiHono<
     const requestId = c.get('requestId') ?? c.req.header('X-Request-Id') ?? crypto.randomUUID();
     c.header('X-Request-Id', requestId);
 
+    // Unauthenticated HTTP callers initialize strictly as ANONYMOUS with zero permissions
     let context: RequestContext = {
       requestId,
-      actorId: SYSTEM_ACTORS.SYSTEM_CRON,
-      actorSource: 'SYSTEM',
+      actorId: ANONYMOUS_ACTOR_ID,
+      actorSource: 'ANONYMOUS',
       permissions: [],
     };
 
@@ -67,15 +71,16 @@ export const initDiScope = inferdiHono<
         const userWithRole = session.user as {
           role?: string;
         };
-        const globalRole = (userWithRole.role as PlatformRole) ?? 'CUSTOMER';
+        const dbRole = (userWithRole.role as PlatformRole) ?? 'CUSTOMER';
+        // Corporate-email PLATFORM_ADMIN maps to PLATFORM_STAFF; Mobile+OTP CUSTOMER maps to CUSTOMER
+        const actorSource: ActorSource =
+          dbRole === 'PLATFORM_ADMIN' ? 'PLATFORM_STAFF' : 'CUSTOMER';
         context = {
           requestId,
           actorId: session.user.id,
-          actorSource: 'GLOBAL_USER',
-          globalRole,
+          actorSource,
           permissions: resolveDefaultPermissionsForActor({
-            actorSource: 'GLOBAL_USER',
-            globalRole,
+            actorSource,
           }),
         };
       }
@@ -88,25 +93,52 @@ export const initDiScope = inferdiHono<
   },
 });
 
-export const requireGlobalUser = (allowedRoles?: readonly PlatformRole[]) =>
+export const requireCustomer = () =>
   createMiddleware<AppEnv>(async (c, next) => {
     const request = c.var.di.get('request');
 
-    if (request.actorSource !== 'GLOBAL_USER' || !request.globalRole) {
+    if (request.actorSource === 'ANONYMOUS') {
       return c.json(
         {
           code: 'UNAUTHORIZED',
-          error: 'Unauthorized: Global user session required',
+          error: 'Unauthorized: Customer session required',
         },
         401,
       );
     }
 
-    if (allowedRoles && !allowedRoles.includes(request.globalRole)) {
+    if (request.actorSource !== 'CUSTOMER') {
       return c.json(
         {
           code: 'FORBIDDEN',
-          error: 'Forbidden: Insufficient platform permissions',
+          error: 'Forbidden: Business staff accounts cannot act as customers',
+        },
+        403,
+      );
+    }
+
+    await next();
+  });
+
+export const requirePlatformStaff = () =>
+  createMiddleware<AppEnv>(async (c, next) => {
+    const request = c.var.di.get('request');
+
+    if (request.actorSource === 'ANONYMOUS') {
+      return c.json(
+        {
+          code: 'UNAUTHORIZED',
+          error: 'Unauthorized: Platform staff session required',
+        },
+        401,
+      );
+    }
+
+    if (request.actorSource !== 'PLATFORM_STAFF') {
+      return c.json(
+        {
+          code: 'FORBIDDEN',
+          error: 'Forbidden: Platform staff privileges required',
         },
         403,
       );
@@ -147,7 +179,7 @@ export const requirePermission = (permission: Permission) =>
     const request = c.var.di.get('request');
     const authz = c.var.di.get('authz');
 
-    if (request.actorSource === 'SYSTEM') {
+    if (request.actorSource === 'ANONYMOUS') {
       return c.json(
         {
           code: 'UNAUTHORIZED',
@@ -179,7 +211,7 @@ export const requireAnyPermission = (...permissions: readonly Permission[]) =>
     const request = c.var.di.get('request');
     const authz = c.var.di.get('authz');
 
-    if (request.actorSource === 'SYSTEM') {
+    if (request.actorSource === 'ANONYMOUS') {
       return c.json(
         {
           code: 'UNAUTHORIZED',
@@ -284,7 +316,7 @@ export const requireTenantOrSupportTicket = (params: {
     const request = c.var.di.get('request');
     const authz = c.var.di.get('authz');
 
-    if (request.actorSource === 'SYSTEM') {
+    if (request.actorSource === 'ANONYMOUS') {
       return c.json(
         {
           code: 'UNAUTHORIZED',

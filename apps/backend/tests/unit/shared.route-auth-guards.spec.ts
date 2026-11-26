@@ -1,4 +1,4 @@
-import { SYSTEM_ACTORS } from '@foodapp/db';
+import { ANONYMOUS_ACTOR_ID } from '@foodapp/db';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { describe, expect, it } from 'vitest';
 import { billingRoutes } from '@/billing/services/billing-routes';
@@ -47,14 +47,14 @@ function buildAppWithActor(actor: RequestContext) {
   return app;
 }
 
-describe('shared.route-auth-guards — Fail-Fast 401 & Three-Actor 403 Isolation', () => {
+describe('shared.route-auth-guards — Fail-Fast 401 & Four-Actor 403 Isolation', () => {
   const sampleUuid = '00000000-0000-4000-8000-000000000001';
 
-  it('returns 401 Unauthorized on all protected POS, Support, Brand, Catalog, Billing, Loyalty & Order routes when unauthenticated', async () => {
+  it('returns 401 Unauthorized on all protected POS, Support, Brand, Catalog, Billing, Loyalty & Order routes when ANONYMOUS', async () => {
     const app = buildAppWithActor({
       requestId: 'req-unauth',
-      actorId: SYSTEM_ACTORS.SYSTEM_CRON,
-      actorSource: 'SYSTEM',
+      actorId: ANONYMOUS_ACTOR_ID,
+      actorSource: 'ANONYMOUS',
       permissions: [],
     });
 
@@ -190,7 +190,7 @@ describe('shared.route-auth-guards — Fail-Fast 401 & Three-Actor 403 Isolation
     }
   });
 
-  it('blocks POS_STAFF and PLATFORM_ADMIN from placing customer orders or creating support tickets unilaterally (403)', async () => {
+  it('blocks POS_STAFF and PLATFORM_STAFF from placing customer orders or creating support tickets unilaterally (403)', async () => {
     const posApp = buildAppWithActor({
       requestId: 'req-pos',
       actorId: 'staff-1',
@@ -215,13 +215,12 @@ describe('shared.route-auth-guards — Fail-Fast 401 & Three-Actor 403 Isolation
     const adminApp = buildAppWithActor({
       requestId: 'req-admin',
       actorId: 'admin-1',
-      actorSource: 'GLOBAL_USER',
-      globalRole: 'PLATFORM_ADMIN',
+      actorSource: 'PLATFORM_STAFF',
       permissions: resolveDefaultPermissionsForActor({
-        actorSource: 'GLOBAL_USER',
-        globalRole: 'PLATFORM_ADMIN',
+        actorSource: 'PLATFORM_STAFF',
       }),
     });
+
     const adminCreateTicket = await adminApp.request('/api/pos/support-tickets', {
       method: 'POST',
       headers: {

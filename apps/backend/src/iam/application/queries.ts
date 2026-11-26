@@ -5,7 +5,7 @@ import type { ReadRepository } from '@/core/infrastructure/read-repository';
 
 export interface ActiveActorProfileDto {
   id: string;
-  source: 'GLOBAL_USER' | 'POS_STAFF' | 'SYSTEM';
+  source: 'ANONYMOUS' | 'CUSTOMER' | 'POS_STAFF' | 'PLATFORM_STAFF';
   name: string;
   email: string;
   role: string;
@@ -55,7 +55,7 @@ export class GetCurrentActorHandler
       };
     }
 
-    if (this.request.actorSource === 'GLOBAL_USER') {
+    if (this.request.actorSource === 'CUSTOMER' || this.request.actorSource === 'PLATFORM_STAFF') {
       const { cols } = UserTable;
       const q = sqlSelect(UserTable)
         .select([
@@ -73,7 +73,7 @@ export class GetCurrentActorHandler
 
       return {
         id: user.id,
-        source: 'GLOBAL_USER',
+        source: this.request.actorSource,
         name: user.name,
         email: user.email,
         role: user.role,

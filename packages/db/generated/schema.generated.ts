@@ -1,5 +1,5 @@
 // AUTO-GENERATED FILE — DO NOT EDIT MANUALLY
-// Generated at: 2026-11-24T12:12:27.395Z
+// Generated at: 2026-11-26T07:30:44.855Z
 // Run `pnpm db:codegen` after applying new SQL migrations.
 
 export interface TableMeta<TCols extends Record<string, string>, TRow, TInsert = Partial<TRow>> {

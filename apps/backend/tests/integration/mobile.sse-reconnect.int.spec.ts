@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ALL_PERMISSIONS, redisClient, SYSTEM_ACTORS } from '@foodapp/db';
+import { CUSTOMER_PERMISSIONS, redisClient, SYSTEM_ROLE_DEFINITIONS } from '@foodapp/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rootContainer } from '@/container';
 import { AppLogger } from '@/logger';
@@ -9,6 +9,7 @@ describe('mobile.sse-reconnect — Mobile SSE Stream & Last-Event-ID Replay', ()
   const branchId = 'b0000000-0000-4000-8000-000000000007';
   const menuItemId = 'e0000000-0000-4000-8000-000000000006';
   const customerId = '11111111-1111-4111-8111-111111111111';
+  const tomStaffId = 'c0000000-0000-4000-8000-000000000007';
 
   beforeAll(async () => {
     if (!redisClient.isOpen) await redisClient.connect();
@@ -23,8 +24,8 @@ describe('mobile.sse-reconnect — Mobile SSE Stream & Last-Event-ID Replay', ()
       request: {
         requestId: randomUUID(),
         actorId: customerId,
-        actorSource: 'GLOBAL_USER',
-        permissions: ALL_PERMISSIONS,
+        actorSource: 'CUSTOMER',
+        permissions: CUSTOMER_PERMISSIONS,
       },
       log: new AppLogger('int-sse-customer'),
     });
@@ -32,11 +33,11 @@ describe('mobile.sse-reconnect — Mobile SSE Stream & Last-Event-ID Replay', ()
     const branchScope = rootContainer.createScope({
       request: {
         requestId: randomUUID(),
-        actorId: SYSTEM_ACTORS.SYSTEM_CRON,
-        actorSource: 'SYSTEM',
+        actorId: tomStaffId,
+        actorSource: 'POS_STAFF',
         restaurantId,
         branchId,
-        permissions: ALL_PERMISSIONS,
+        permissions: SYSTEM_ROLE_DEFINITIONS.BRAND_OWNER.permissions,
       },
       log: new AppLogger('int-sse-branch'),
     });

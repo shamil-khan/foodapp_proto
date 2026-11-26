@@ -1,5 +1,4 @@
 import {
-  ALL_PERMISSIONS,
   type Permission,
   type PermissionEffect,
   type redisClient,
@@ -8,6 +7,7 @@ import {
   StaffRolePermissionTable,
   StaffRoleTable,
   sqlSelect,
+  TENANT_PERMISSIONS,
 } from '@foodapp/db';
 import type { ReadRepository } from '@/core/infrastructure/read-repository';
 import {
@@ -17,7 +17,7 @@ import {
 
 type RedisClientType = typeof redisClient;
 
-const ALLOWED_PERMISSION_SET = new Set<string>(ALL_PERMISSIONS);
+const ALLOWED_PERMISSION_SET = new Set<string>(TENANT_PERMISSIONS);
 
 export class RolePermissionCache {
   private static readonly TTL_SECONDS = 3600;

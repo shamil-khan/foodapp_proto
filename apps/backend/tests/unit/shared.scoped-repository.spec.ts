@@ -30,11 +30,11 @@ describe('shared.scoped-repository — Mandatory Tenant & Branch Isolation', () 
     expect(() => repo.requireBranch('branch-A1')).not.toThrow();
   });
 
-  it('throws TENANT_SCOPE_VIOLATION when context is unauthorized or crosses branch boundaries', () => {
+  it('throws TENANT_SCOPE_VIOLATION when context is ANONYMOUS or crosses branch boundaries', () => {
     const unauthCtx: RequestContext = {
       requestId: 'req-2',
-      actorId: 'anon',
-      actorSource: 'GLOBAL_USER',
+      actorId: '00000000-0000-4000-8a00-000000000000',
+      actorSource: 'ANONYMOUS',
       permissions: [],
     };
     const unauthRepo = new TestTenantRepo(unauthCtx);

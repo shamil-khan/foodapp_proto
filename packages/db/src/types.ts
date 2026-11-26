@@ -1,16 +1,6 @@
-// --- FILE: packages/db/src/types.ts (Part 1 of 2) ---
-export const SYSTEM_ACTORS = {
-  /** 85EE = SEED (Initial database seed script) */
-  SEED_SCRIPT: '00000000-0000-4000-85ee-000000000001',
-  /** 8515 = SYS (Automated background cron & scheduled tasks) */
-  SYSTEM_CRON: '00000000-0000-4000-8515-000000000001',
-  /** 8B07 = BOT (Hardware POS & KDS printer webhooks) */
-  POS_WEBHOOK_BOT: '00000000-0000-4000-8b07-000000000001',
-  /** 8A01 = AUDIT (Migration & schema backfill guard) */
-  MIGRATION_GUARD: '00000000-0000-4000-8a01-000000000001',
-} as const;
-
-export type SystemActorId = (typeof SYSTEM_ACTORS)[keyof typeof SYSTEM_ACTORS];
+export const ANONYMOUS_ACTOR_ID = '00000000-0000-4000-8a00-000000000000';
+export const BOOTSTRAP_ACTOR_ID = '00000000-0000-4000-8b00-000000000000';
+export const SEED_ACTOR_ID = '00000000-0000-4000-85ee-000000000001';
 
 export type PlatformRole = 'PLATFORM_ADMIN' | 'CUSTOMER' | 'DRIVER';
 export type TenantRole = 'OWNER' | 'ADMIN' | 'MANAGER' | 'ORDER_TAKER';
@@ -192,16 +182,10 @@ export const PLATFORM_ADMIN_PERMISSIONS = [
   ...PLATFORM_SUPPORT_SCOPES,
 ] as const;
 
-export const ALL_PERMISSIONS = [
-  ...TENANT_PERMISSIONS,
-  ...CUSTOMER_PERMISSIONS,
-  ...PLATFORM_ADMIN_PERMISSIONS,
-] as const;
-
 export type CustomerPermission = (typeof CUSTOMER_PERMISSIONS)[number];
 export type PlatformSupportScope = (typeof PLATFORM_SUPPORT_SCOPES)[number];
 export type PlatformAdminPermission = (typeof PLATFORM_ADMIN_PERMISSIONS)[number];
-export type Permission = (typeof ALL_PERMISSIONS)[number];
+export type Permission = TenantPermission | CustomerPermission | PlatformAdminPermission;
 
 export interface SystemRoleDefinition {
   readonly description: string;

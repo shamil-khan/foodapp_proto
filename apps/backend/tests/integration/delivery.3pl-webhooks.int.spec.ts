@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ALL_PERMISSIONS, pgPool, redisClient, SYSTEM_ACTORS } from '@foodapp/db';
+import { CUSTOMER_PERMISSIONS, pgPool, redisClient, SYSTEM_ROLE_DEFINITIONS } from '@foodapp/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { rootContainer } from '@/container';
 import { AppLogger } from '@/logger';
@@ -9,6 +9,7 @@ describe('delivery.3pl-webhooks — Inbound Courier Webhook & Payload Snapshot A
   const branchId = 'b0000000-0000-4000-8000-000000000003';
   const menuItemId = 'e0000000-0000-4000-8000-000000000003';
   const customerId = '11111111-1111-4111-8111-111111111111';
+  const leoStaffId = 'c0000000-0000-4000-8000-000000000003';
 
   beforeAll(async () => {
     if (!redisClient.isOpen) await redisClient.connect();
@@ -23,8 +24,8 @@ describe('delivery.3pl-webhooks — Inbound Courier Webhook & Payload Snapshot A
       request: {
         requestId: randomUUID(),
         actorId: customerId,
-        actorSource: 'GLOBAL_USER',
-        permissions: ALL_PERMISSIONS,
+        actorSource: 'CUSTOMER',
+        permissions: CUSTOMER_PERMISSIONS,
       },
       log: new AppLogger('int-3pl-customer'),
     });
@@ -32,11 +33,11 @@ describe('delivery.3pl-webhooks — Inbound Courier Webhook & Payload Snapshot A
     const branchScope = rootContainer.createScope({
       request: {
         requestId: randomUUID(),
-        actorId: SYSTEM_ACTORS.SYSTEM_CRON,
-        actorSource: 'SYSTEM',
+        actorId: leoStaffId,
+        actorSource: 'POS_STAFF',
         restaurantId,
         branchId,
-        permissions: ALL_PERMISSIONS,
+        permissions: SYSTEM_ROLE_DEFINITIONS.BRAND_OWNER.permissions,
       },
       log: new AppLogger('int-3pl-branch'),
     });
